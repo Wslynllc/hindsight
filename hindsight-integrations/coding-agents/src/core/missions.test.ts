@@ -31,7 +31,9 @@ describe("buildPageTrigger", () => {
       fact_types: PAGE_FACT_TYPES,
       refresh_cron: DEFAULT_PAGE_TRIGGER_CRON,
     });
-    expect(buildPageTrigger(resolveConfig({}))).toEqual(buildPageTrigger());
+    expect(buildPageTrigger(resolveConfig({ pageTriggerType: "cron" }))).toEqual(
+      buildPageTrigger()
+    );
   });
 
   /**
@@ -235,11 +237,22 @@ describe("pageTriggerPatch", () => {
 describe("page trigger config resolution", () => {
   // The default: hourly, each page on its own hashed minute. Auto-refresh — one LLM synthesis per
   // page per consolidation — is now opt-in.
-  it("schedules an unconfigured repo's pages hourly and staggered", () => {
-    expect(resolveConfig({}).pageTriggerType).toBe("cron");
-    expect(resolveConfig({}).pageTriggerCron).toBe(DEFAULT_PAGE_TRIGGER_CRON);
+  it("refreshes nothing on its own unless asked", () => {
+    expect(resolveConfig({}).pageTriggerType).toBe("manual");
+    expect(resolveConfig({}).pageTriggerCron).toBeUndefined();
+  });
+
+  it("selects the schedule when only an expression is named", () => {
+    const cfg = resolveConfig({ pageTriggerCron: "0 3 * * *" });
+    expect(cfg.pageTriggerType).toBe("cron");
+    expect(cfg.pageTriggerCron).toBe("0 3 * * *");
+  });
+
+  it("schedules pages hourly and staggered when cron is asked for", () => {
+    const cfg = resolveConfig({ pageTriggerType: "cron" });
+    expect(cfg.pageTriggerCron).toBe(DEFAULT_PAGE_TRIGGER_CRON);
     expect(DEFAULT_PAGE_TRIGGER_CRON).toBe("H * * * *");
-    const trigger = buildPageTrigger(resolveConfig({}));
+    const trigger = buildPageTrigger(cfg);
     expect(trigger.refresh_cron).toBe(DEFAULT_PAGE_TRIGGER_CRON);
     expect(trigger.refresh_after_consolidation).toBeUndefined();
     // And the `H` is resolved per page before it is sent — see "hashed cron fields" above.
@@ -289,8 +302,7 @@ describe("page trigger config resolution", () => {
 
   it("ignores a value that is not one of the three types", () => {
     const cfg = resolveConfig({ pageTriggerType: "whenever" as never });
-    expect(cfg.pageTriggerType).toBe("cron");
-    expect(cfg.pageTriggerCron).toBe(DEFAULT_PAGE_TRIGGER_CRON);
+    expect(cfg.pageTriggerType).toBe("manual");
   });
 });
 

@@ -21,25 +21,8 @@ describe("parseCliArgs", () => {
     expect(parseCliArgs(["/tmp/b.json"]).positional).toBe("/tmp/b.json");
   });
 
-  it("parses cloud-mode flags (direct token value)", () => {
-    const args = parseCliArgs(["--mode", "cloud", "--token", "hsk_literal"]);
-    expect(args).toMatchObject({ mode: "cloud", token: "hsk_literal" });
-  });
-
-  it("parses cloud-mode flags (token env var)", () => {
-    const args = parseCliArgs([
-      "--mode",
-      "cloud",
-      "--api-url",
-      "https://cloud.example.com",
-      "--token-env",
-      "HINDSIGHT_CLOUD_TOKEN",
-    ]);
-    expect(args).toMatchObject({
-      mode: "cloud",
-      apiUrl: "https://cloud.example.com",
-      tokenEnv: "HINDSIGHT_CLOUD_TOKEN",
-    });
+  it("refuses the retired cloud mode", () => {
+    expect(() => parseCliArgs(["--mode", "cloud"])).toThrow(/expected api \| embedded/);
   });
 
   it("parses embedded-mode direct apiKey flag", () => {
@@ -126,68 +109,6 @@ describe("runNonInteractive", () => {
   async function readBack(): Promise<OpenClawConfigShape> {
     return JSON.parse(await readFile(configPath, "utf8")) as OpenClawConfigShape;
   }
-
-  it("writes a cloud-mode config with the default URL", async () => {
-    const args = parseCliArgs(["--mode", "cloud", "--token-env", "HINDSIGHT_CLOUD_TOKEN"]);
-    const result = await runNonInteractive(args, configPath);
-    expect(result.summary).toContain("Cloud");
-    const cfg = await readBack();
-    const pc = cfg.plugins?.entries?.[PLUGIN_ID]?.config ?? {};
-    expect(pc.hindsightApiUrl).toBe("https://api.hindsight.vectorize.io");
-    expect(pc.hindsightApiToken).toEqual({
-      source: "env",
-      provider: "default",
-      id: "HINDSIGHT_CLOUD_TOKEN",
-    });
-    expect(cfg.plugins?.entries?.[PLUGIN_ID]?.enabled).toBe(true);
-  });
-
-  it("writes a cloud-mode config with a custom URL", async () => {
-    const args = parseCliArgs([
-      "--mode",
-      "cloud",
-      "--api-url",
-      "https://hindsight.custom.example.com",
-      "--token-env",
-      "MY_TOKEN",
-    ]);
-    await runNonInteractive(args, configPath);
-    const cfg = await readBack();
-    const pc = cfg.plugins?.entries?.[PLUGIN_ID]?.config ?? {};
-    expect(pc.hindsightApiUrl).toBe("https://hindsight.custom.example.com");
-    expect((pc.hindsightApiToken as { id: string }).id).toBe("MY_TOKEN");
-  });
-
-  it("writes a cloud-mode config with an inline token (--token)", async () => {
-    const args = parseCliArgs(["--mode", "cloud", "--token", "hsk_direct_value"]);
-    await runNonInteractive(args, configPath);
-    const cfg = await readBack();
-    const pc = cfg.plugins?.entries?.[PLUGIN_ID]?.config ?? {};
-    expect(pc.hindsightApiUrl).toBe("https://api.hindsight.vectorize.io");
-    expect(pc.hindsightApiToken).toBe("hsk_direct_value");
-  });
-
-  it("rejects cloud mode without --token or --token-env", async () => {
-    const args = parseCliArgs(["--mode", "cloud"]);
-    await expect(runNonInteractive(args, configPath)).rejects.toThrow(/--token .*--token-env/);
-  });
-
-  it("rejects cloud mode with both --token and --token-env", async () => {
-    const args = parseCliArgs([
-      "--mode",
-      "cloud",
-      "--token",
-      "hsk_x",
-      "--token-env",
-      "HINDSIGHT_CLOUD_TOKEN",
-    ]);
-    await expect(runNonInteractive(args, configPath)).rejects.toThrow(/mutually exclusive/);
-  });
-
-  it("rejects cloud mode with a bad token env var name", async () => {
-    const args = parseCliArgs(["--mode", "cloud", "--token-env", "bad-name"]);
-    await expect(runNonInteractive(args, configPath)).rejects.toThrow(/UPPER_SNAKE_CASE/);
-  });
 
   it("writes an api-mode config without token", async () => {
     const args = parseCliArgs([
@@ -323,15 +244,15 @@ describe("runNonInteractive", () => {
     let cfg = await readBack();
     expect(cfg.plugins?.entries?.[PLUGIN_ID]?.config?.llmProvider).toBe("openai");
 
-    // Now switch to cloud mode — local LLM fields should be gone
+    // Now switch to the external API — local LLM fields should be gone
     await runNonInteractive(
-      parseCliArgs(["--mode", "cloud", "--token-env", "HINDSIGHT_CLOUD_TOKEN"]),
+      parseCliArgs(["--mode", "api", "--api-url", "http://box:8888", "--token-env", "HS_TOKEN"]),
       configPath
     );
     cfg = await readBack();
     const pc = cfg.plugins?.entries?.[PLUGIN_ID]?.config ?? {};
     expect(pc.llmProvider).toBeUndefined();
     expect(pc.llmApiKey).toBeUndefined();
-    expect(pc.hindsightApiUrl).toBe("https://api.hindsight.vectorize.io");
+    expect(pc.hindsightApiUrl).toBe("http://box:8888");
   });
 });

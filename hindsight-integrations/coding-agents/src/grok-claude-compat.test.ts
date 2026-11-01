@@ -27,7 +27,11 @@ vi.mock("node:fs", async (importOriginal) => {
 let rawConfig: RawConfig = {};
 vi.mock("./core/config", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./core/config")>();
-  return { ...actual, loadConfig: () => actual.resolveConfig(rawConfig) };
+  return {
+    ...actual,
+    loadConfig: () =>
+      actual.resolveConfig({ apiUrl: "http://server.test", optInOnly: false, ...rawConfig }),
+  };
 });
 
 let root: string;
@@ -68,7 +72,7 @@ beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "hs-grok-compat-"));
   execFileSync("git", ["init", "-q", root]);
   sessionId = `sess-grok-${basename(root)}`;
-  rawConfig = { autoSeed: false, autoUpdate: false };
+  rawConfig = { autoSeed: false, autoInject: "reflect" };
   vi.stubEnv("HINDSIGHT_DIAG_FILE", join(root, "diag.log"));
 });
 

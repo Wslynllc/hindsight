@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   createInstallerUi,
-  fitSelectRow,
-  selectKeyAction,
-  splitKeys,
   type InstallerUi,
 } from "./install-ui";
 
@@ -64,17 +61,17 @@ describe("installer UI renderer", () => {
     const { ui, lines } = makeUi("install");
     ui.intro();
     ui.log(
-      "\nWhere should memory live?\n  1) Hindsight Cloud\n  2) Self-hosted\n  3) Local daemon\n"
+      "\nWhere should memory live?\n  1) Self-hosted\n  2) Other\n"
     );
-    ui.log("server: daemon (/home/u/.hindsight/coding-agent.json)");
+    ui.log("server: self-hosted (/home/u/.hindsight/coding-agent.json)");
     ui.log("codex: hooks merged into /home/u/.codex/hooks.json");
     ui.outro(0);
     const out = lines.join("\n");
     // The mode question is an info line with quiet option detail, not a completed action.
     expect(out).toContain("○ Where should memory live?");
-    expect(out).toContain("│    1) Hindsight Cloud");
+    expect(out).toContain("│    1) Self-hosted");
     expect(out).toContain("◇  server");
-    expect(out).toContain("✓ daemon (~/.hindsight/coding-agent.json)");
+    expect(out).toContain("✓ self-hosted (~/.hindsight/coding-agent.json)");
     expect(out).toMatch(/Installed 1 agent in/); // codex only — server is a step, not an agent
   });
 
@@ -84,14 +81,14 @@ describe("installer UI renderer", () => {
     ui.log(
       "\n❌ codex: `node:sqlite` is unavailable in the node on PATH.\n   Upgrade to Node 22.5."
     );
-    ui.log("⚠️  `uv` is not on PATH. The daemon is fetched and run with it.");
+    ui.log("⚠️  something optional is not on PATH.");
     ui.outro(1);
     const out = lines.join("\n");
     // The ❌ line still opens its harness group once the marker is stripped.
     expect(out).toContain("◇  codex");
     expect(out).toContain("✖ `node:sqlite` is unavailable");
     expect(out).not.toContain("❌");
-    expect(out).toContain("▲ `uv` is not on PATH");
+    expect(out).toContain("▲ something optional is not on PATH");
     expect(out).not.toContain("⚠️");
   });
 
@@ -195,51 +192,6 @@ describe("installer UI renderer", () => {
   it("styles readline prompts onto the rail", () => {
     const { ui } = makeUi("install");
     expect(ui.prompt("Choose [1-3] (default 1): ")).toBe("│  Choose [1-3] (default 1): ");
-  });
-
-  it("select keys: arrows wrap, vi keys move, Enter submits, digits shortcut, Esc/q/Ctrl+C cancel", () => {
-    expect(selectKeyAction("\x1b[B", 0, 3)).toEqual({ kind: "move", index: 1 });
-    expect(selectKeyAction("\x1b[B", 2, 3)).toEqual({ kind: "move", index: 0 }); // wraps down
-    expect(selectKeyAction("\x1b[A", 0, 3)).toEqual({ kind: "move", index: 2 }); // wraps up
-    expect(selectKeyAction("j", 0, 3)).toEqual({ kind: "move", index: 1 });
-    expect(selectKeyAction("k", 1, 3)).toEqual({ kind: "move", index: 0 });
-    expect(selectKeyAction("\r", 1, 3)).toEqual({ kind: "submit", index: 1 });
-    expect(selectKeyAction("3", 0, 3)).toEqual({ kind: "submit", index: 2 });
-    expect(selectKeyAction("9", 0, 3)).toEqual({ kind: "none", index: 0 }); // out of range
-    expect(selectKeyAction("\x1b", 1, 3)).toEqual({ kind: "cancel", index: 1 });
-    expect(selectKeyAction("q", 1, 3)).toEqual({ kind: "cancel", index: 1 });
-    expect(selectKeyAction("\x03", 1, 3)).toEqual({ kind: "cancel", index: 1 });
-    expect(selectKeyAction("x", 1, 3)).toEqual({ kind: "none", index: 1 });
-  });
-
-  it("splits a burst of keys from one read into individual tokens", () => {
-    // Key repeat / paste: ↓ then Enter arriving in a single read must act as two keys.
-    expect(splitKeys("\x1b[B\r")).toEqual(["\x1b[B", "\r"]);
-    expect(splitKeys("\x1b[A\x1b[A\x1b[B")).toEqual(["\x1b[A", "\x1b[A", "\x1b[B"]);
-    expect(splitKeys("2\r")).toEqual(["2", "\r"]);
-    expect(splitKeys("\x1b")).toEqual(["\x1b"]); // a lone Esc stays a cancel key
-    expect(splitKeys("jk")).toEqual(["j", "k"]);
-    expect(splitKeys("\x1b[")).toEqual(["\x1b["]); // truncated CSI at chunk end doesn't crash
-  });
-
-  it("fits select rows to the terminal width so a row can never wrap", () => {
-    const label = "Local daemon (on-device)";
-    const hint = "runs hindsight-embed here; no account, needs uv + an LLM key";
-    // Wide terminal: everything fits untouched.
-    const wide = fitSelectRow(label, hint, 120);
-    expect(wide).toEqual({ label, hint: ` — ${hint}` });
-    // Narrow terminal: the hint is truncated with an ellipsis, the label survives.
-    const narrow = fitSelectRow(label, hint, 60);
-    expect(narrow.label).toBe(label);
-    expect(narrow.hint.endsWith("…")).toBe(true);
-    expect(narrow.label.length + narrow.hint.length).toBeLessThanOrEqual(60 - 6);
-    // Tiny terminal: even the label is cut, and the hint is dropped entirely.
-    const tiny = fitSelectRow(label, hint, 20);
-    expect(tiny.hint).toBe("");
-    expect(tiny.label.endsWith("…")).toBe(true);
-    expect(tiny.label.length).toBeLessThanOrEqual(20 - 6);
-    // No hint at all stays stable.
-    expect(fitSelectRow("Cloud", undefined, 80)).toEqual({ label: "Cloud", hint: "" });
   });
 
   it("emits ANSI only when colors are on", () => {

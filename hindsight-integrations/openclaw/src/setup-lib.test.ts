@@ -3,10 +3,8 @@ import { mkdtemp, readFile, rm, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
-  HINDSIGHT_CLOUD_URL,
   PLUGIN_ID,
   applyApiMode,
-  applyCloudMode,
   applyEmbeddedMode,
   ensurePluginConfig,
   envSecretRef,
@@ -14,7 +12,6 @@ import {
   loadConfig,
   saveConfig,
   summarizeApi,
-  summarizeCloud,
   summarizeEmbedded,
   type OpenClawConfigShape,
 } from "./setup-lib.js";
@@ -22,7 +19,7 @@ import {
 describe("isValidEnvVarName", () => {
   it("accepts UPPER_SNAKE_CASE", () => {
     expect(isValidEnvVarName("OPENAI_API_KEY")).toBe(true);
-    expect(isValidEnvVarName("HINDSIGHT_CLOUD_TOKEN")).toBe(true);
+    expect(isValidEnvVarName("HINDSIGHT_API_TOKEN")).toBe(true);
     expect(isValidEnvVarName("A")).toBe(true);
   });
   it("rejects lowercase, leading digits, empty, and undefined", () => {
@@ -197,70 +194,6 @@ describe("ensurePluginConfig", () => {
   });
 });
 
-describe("applyCloudMode — direct token value", () => {
-  it("stores the token inline when a literal value is provided", () => {
-    const pc: Record<string, unknown> = {
-      llmProvider: "openai",
-      llmApiKey: { source: "env", provider: "default", id: "OPENAI_API_KEY" },
-    };
-    applyCloudMode(pc, { token: "hsk_literal_value" });
-    expect(pc.hindsightApiUrl).toBe(HINDSIGHT_CLOUD_URL);
-    expect(pc.hindsightApiToken).toBe("hsk_literal_value");
-    expect(pc.llmProvider).toBeUndefined();
-    expect(pc.llmApiKey).toBeUndefined();
-  });
-
-  it("trims whitespace around an inline token", () => {
-    const pc: Record<string, unknown> = {};
-    applyCloudMode(pc, { token: "  hsk_padded  " });
-    expect(pc.hindsightApiToken).toBe("hsk_padded");
-  });
-
-  it("throws when neither token nor tokenEnvVar is provided", () => {
-    const pc: Record<string, unknown> = {};
-    expect(() => applyCloudMode(pc, {})).toThrow(/requires either/);
-  });
-
-  it("throws when both token and tokenEnvVar are provided", () => {
-    const pc: Record<string, unknown> = {};
-    expect(() => applyCloudMode(pc, { token: "x", tokenEnvVar: "Y" })).toThrow(
-      /either a direct value or an env var name/
-    );
-  });
-});
-
-describe("applyCloudMode", () => {
-  it("writes the default URL and a SecretRef, stripping local LLM state", () => {
-    const pc: Record<string, unknown> = {
-      llmProvider: "openai",
-      llmApiKey: { source: "env", provider: "default", id: "OPENAI_API_KEY" },
-      llmModel: "gpt-4o-mini",
-      llmBaseUrl: "https://openrouter.ai/api/v1",
-    };
-    applyCloudMode(pc, { tokenEnvVar: "HINDSIGHT_CLOUD_TOKEN" });
-    expect(pc.hindsightApiUrl).toBe(HINDSIGHT_CLOUD_URL);
-    expect(pc.hindsightApiToken).toEqual({
-      source: "env",
-      provider: "default",
-      id: "HINDSIGHT_CLOUD_TOKEN",
-    });
-    expect(pc.llmProvider).toBeUndefined();
-    expect(pc.llmApiKey).toBeUndefined();
-    expect(pc.llmModel).toBeUndefined();
-    expect(pc.llmBaseUrl).toBeUndefined();
-  });
-
-  it("honours an overridden apiUrl", () => {
-    const pc: Record<string, unknown> = {};
-    applyCloudMode(pc, {
-      apiUrl: "https://cloud.example.com",
-      tokenEnvVar: "CLOUD_TOKEN",
-    });
-    expect(pc.hindsightApiUrl).toBe("https://cloud.example.com");
-    expect((pc.hindsightApiToken as { id: string }).id).toBe("CLOUD_TOKEN");
-  });
-});
-
 describe("applyApiMode — direct token value", () => {
   it("stores the token inline when a literal value is provided", () => {
     const pc: Record<string, unknown> = {};
@@ -380,9 +313,6 @@ describe("applyEmbeddedMode", () => {
 
 describe("summarize*", () => {
   it("produces human-readable mode summaries", () => {
-    expect(summarizeCloud({ tokenEnvVar: "HINDSIGHT_CLOUD_TOKEN" })).toBe(
-      "Cloud → https://api.hindsight.vectorize.io (token from ${HINDSIGHT_CLOUD_TOKEN})"
-    );
     expect(summarizeApi({ apiUrl: "https://api.example.com", tokenEnvVar: "T" })).toBe(
       "External API → https://api.example.com (token from ${T})"
     );

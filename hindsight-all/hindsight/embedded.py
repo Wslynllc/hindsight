@@ -11,8 +11,8 @@ Example:
     # Daemon starts automatically on first use
     client = HindsightEmbedded(
         profile="myapp",
-        llm_provider="groq",
-        llm_api_key="your-api-key",
+        llm_provider="ollama",
+        llm_base_url="http://localhost:11434/v1",
     )
 
     # Use just like HindsightClient
@@ -73,8 +73,8 @@ class HindsightEmbedded:
 
     Args:
         profile: Profile name for data isolation (default: "default")
-        llm_provider: LLM provider ("groq", "openai", "ollama", "gemini", "anthropic",
-            "lmstudio", "github-copilot"). Omit to inherit; the server default is "openai".
+        llm_provider: LLM provider ("ollama", "lmstudio", "llamacpp", "openai" with a local
+            base URL, "none"). Omit to inherit; the server default is "none".
         llm_api_key: API key for the LLM provider. Omit to inherit; pass "" to
             explicitly run without a key (local services that need no auth).
         llm_model: Model name to use. Omit to inherit; the server picks a default

@@ -125,9 +125,8 @@ def test_a_provider_reflect_cannot_speak_leaves_agent_turns(engine, monkeypatch,
     assert engine._reflect_decision_model() is None
 
 
-@pytest.mark.parametrize("provider", ["typesafe", "hindsight"])
+@pytest.mark.parametrize("provider", ["typesafe"])
 def test_a_system_one_provider_drives_reflect(engine, monkeypatch, provider):
-    """Hindsight Inference serves System One too, so reflect and pages run on it."""
     from hindsight_api.config import DecisionModelConfig
 
     setup = DecisionModelConfig(

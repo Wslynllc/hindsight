@@ -13,13 +13,15 @@ explains what happens automatically, which tools you have, and how to configure 
 
 - **Per-repo memory bank**: each repository resolves to a bank (shown in the session banner:
   `↳ memory bank “coding-agent::<repo>”`). Worktrees share the main repo's bank.
-- **Ingestion builds itself**: on first open, the bank is seeded from recent commit messages and a
-  read-only codebase survey; every session start, a background engine tops it up (new commits, new
-  conversations) and keeps 5 knowledge pages current. There is NO ingest command to run.
-- **Session synthesis**: by default, the first prompt of a session triggers one deep memory
-  synthesis (`reflect`) injected into context. `autoInject` switches the source: `pages` (knowledge
-  page search hits), `recall` (recalled observations), or `none` (nothing injected; the agent
-  searches the knowledge pages first and reflects only when they are too shallow).
+- **Opt-in**: memory runs only when a server is configured and the repo is under `optInPaths`.
+  Anywhere else the plugin is inert.
+- **Ingestion builds itself**: every session start, a background engine sets up the bank and its 5
+  knowledge pages. Git history (`gitIngest`) and the codebase survey (`codebaseSurvey`) are off unless
+  configured. There is NO ingest command to run.
+- **Session context**: by default, the first prompt of a session recalls memories into context.
+  `autoInject` switches the source: `reflect` (one deep synthesis), `pages` (knowledge page search
+  hits), or `none` (nothing injected; the agent searches the knowledge pages first and reflects only
+  when they are too shallow).
 - **Write-back**: the session transcript is retained into the bank automatically at session end
   (per-turn on opencode). The user never needs to "save" a conversation.
 

@@ -24,7 +24,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bankProjectName, deriveBankIdOrSkip } from "./core/bank";
 import { ingestChats } from "./core/chat";
-import { applyBankConfig, loadConfig } from "./core/config";
+import { applyBankConfig, loadConfig, usableApiUrl } from "./core/config";
 import { commitsSince, repoNameOf, retainCommit, syncGitLog } from "./core/git";
 import { SURVEY_DOC_IDS } from "./core/survey";
 import {
@@ -63,7 +63,7 @@ const resolved0 = BANK
 const cfg = resolved0.cfg;
 const FINAL_BANK = resolved0.bankId ?? BANK;
 if (cfg.disabled) {
-  console.log(`deepen: bank ${FINAL_BANK} is disabled (banks override) — nothing to do`);
+  console.log(`deepen: memory is off for bank ${FINAL_BANK} — nothing to do`);
   process.exit(0);
 }
 const HARNESS = arg("harness") ?? cfg0.harness;
@@ -71,7 +71,11 @@ const HARNESS = arg("harness") ?? cfg0.harness;
 // `resolved0.bankId !== BANK` means a `banks.<id>.bank` rename redirected this run, and several
 // repos may be renamed onto one destination, so the repo cannot claim to name it.
 const PAGE_PROJECT = REPO && resolved0.bankId === BANK ? bankProjectName(cfg, REPO) : undefined;
-const API_URL = arg("api-url") ?? cfg.apiUrl;
+const API_URL = usableApiUrl(arg("api-url") ?? cfg.apiUrl);
+if (!API_URL) {
+  console.log("deepen: no usable server — nothing to do");
+  process.exit(0);
+}
 const API_TOKEN = arg("api-token") ?? cfg.apiToken;
 const CONV = arg("conversations");
 const GITLOG_LIMIT = arg("gitlog-limit") ? Number(arg("gitlog-limit")) : (cfg.seedLimit ?? 300);

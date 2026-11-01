@@ -667,7 +667,7 @@ describe("zcode installer", () => {
     expect(run(["install", "zcode"], ctx)).toBe(0);
     const skill = join(ctx.home, ...SKILL_DIRS.zcode, "hindsight-coding-agent", "SKILL.md");
     expect(readFileSync(skill, "utf8")).toBe("packaged skill body");
-    // ~/.agents/skills is Codex's and dsh's copy; uninstalling zcode must never take it.
+    // ~/.agents/skills is dsh's copy; uninstalling zcode must never take it.
     expect(existsSync(join(ctx.home, ".agents", "skills", "hindsight-coding-agent"))).toBe(false);
   });
 
@@ -1885,8 +1885,8 @@ describe.each([
 
 describe("pi-family companion skill", () => {
   // Both hosts discover their own skills root AND the shared `~/.agents/skills`. We write the OWN
-  // directory: the shared root is where Codex and dsh install, and uninstallSkill removes by a
-  // fixed name, so installing there would make `uninstall pi` delete their copy too.
+  // directory: the shared root is where dsh installs, and uninstallSkill removes by a fixed name,
+  // so installing there would make `uninstall pi` delete its copy too.
   const HOSTS: [string, string[]][] = [
     ["pi", [".pi", "agent", "skills"]],
     ["prime-agent", [".prime", "agent", "skills"]],
@@ -1920,10 +1920,10 @@ describe("pi-family companion skill", () => {
   );
 
   it.each(HOSTS)(
-    "uninstalling %s cannot strip Codex's copy from the shared ~/.agents/skills root",
+    "uninstalling %s cannot strip dsh's copy from the shared ~/.agents/skills root",
     (harness) => {
       const ctx = ctxWithSkill();
-      run(["install", "codex"], ctx);
+      run(["install", "dsh"], ctx);
       const shared = join(ctx.home, ".agents", "skills", "hindsight-coding-agent");
       expect(existsSync(shared)).toBe(true);
 
@@ -2725,8 +2725,8 @@ describe("runtime staging", () => {
     expect(existsSync(join(staged, "dist", "installer.js"))).toBe(true);
   });
 
-  // `update` is what core/auto-update.ts spawns unattended, so its blast radius IS the contract:
-  // it refreshes the staged runtime and rewrites nothing a host reads.
+  // `update` is documented as re-staging only: it refreshes the staged runtime and rewrites nothing
+  // a host reads.
   it("`update` re-stages the runtime without touching any host config", () => {
     const ctx = makeCtx();
     const v1 = mkdtempSync(join(tmpdir(), "v1-"));
@@ -2747,8 +2747,7 @@ describe("runtime staging", () => {
     const staged = join(ctx.home, ".hindsight", "coding-agents", "dist");
     expect(existsSync(join(staged, "new-only.js"))).toBe(true);
     // Byte-identical: the hooks already point at the staged path, so an update has no reason to
-    // rewrite them — and rewriting is exactly what would let an unattended run wire agents the
-    // user never installed.
+    // rewrite them.
     expect(readFileSync(settingsPath, "utf8")).toBe(before);
   });
 
@@ -2764,22 +2763,6 @@ describe("runtime staging", () => {
     expect(existsSync(join(ctx.home, ".claude", "settings.json"))).toBe(false);
   });
 
-  // The marker is what core/auto-update.ts reads to decide whether it may replace this runtime,
-  // so staging has to write it — an absent marker fails closed and auto-update never runs.
-  it("records where the runtime was staged from", () => {
-    const ctx = makeCtx();
-    const cache = mkdtempSync(join(tmpdir(), "npx-cache-"));
-    homes.push(cache);
-    const src = join(cache, "_npx", "abc123", "node_modules", "coding-agents");
-    Object.assign(ctx, fakePackage(src));
-
-    run(["install", "claude-code"], ctx);
-    const origin = readJson(
-      join(ctx.home, ".hindsight", "coding-agents", ".install-origin.json")
-    ) as { source: string };
-    expect(origin.source).toBe(src);
-  });
-
   // A checkout whose dist was never built has nothing to copy; wiring the source path is better
   // than pointing every hook at a directory that does not exist.
   it("wires in place when there is nothing to stage", () => {
@@ -2793,7 +2776,7 @@ describe("runtime staging", () => {
 });
 
 describe("skill install across skills-capable hosts", () => {
-  it("copies the packaged skill for claude/codex(~/.agents)/antigravity/cursor/qwen/prime-agent and uninstall removes each", () => {
+  it("copies the packaged skill for claude/codex/antigravity/cursor/qwen/prime-agent and uninstall removes each", () => {
     const home = mkdtempSync(join(tmpdir(), "hs-inst-skill-"));
     const pkgRoot = mkdtempSync(join(tmpdir(), "hs-pkg-"));
     mkdirSync(join(pkgRoot, "skill"), { recursive: true });
@@ -2810,7 +2793,7 @@ describe("skill install across skills-capable hosts", () => {
     };
     const targets: [string, string][] = [
       ["claude-code", join(home, ".claude", "skills")],
-      ["codex", join(home, ".agents", "skills")],
+      ["codex", join(home, ".codex", "skills")],
       ["antigravity-cli", join(home, ".gemini", "config", "skills")],
       ["cursor-cli", join(home, ".cursor", "skills")],
       ["qwen-code", join(home, ".qwen", "skills")],
@@ -2832,7 +2815,25 @@ describe("skill install across skills-capable hosts", () => {
 
   // uninstallSkill removes a fixed directory NAME, so a host installing into the shared
   // agentskills root would delete the copy another host is still using.
-  it("uninstalling prime-agent leaves the shared ~/.agents copy Codex installed", () => {
+  // ~/.agents/skills is read by every agentskills host on the machine, so Codex stays out of it.
+  it("installing codex writes nothing to the shared ~/.agents root", () => {
+    const home = mkdtempSync(join(tmpdir(), "hs-inst-skill-"));
+    const pkgRoot = mkdtempSync(join(tmpdir(), "hs-pkg-"));
+    mkdirSync(join(pkgRoot, "skill"), { recursive: true });
+    writeFileSync(
+      join(pkgRoot, "skill", "SKILL.md"),
+      "---\nname: hindsight-coding-agent\n---\nbody"
+    );
+    run(["install", "codex"], { home, pkgRoot, dist: join(pkgRoot, "dist") });
+    expect(existsSync(join(home, ".codex", "skills", "hindsight-coding-agent", "SKILL.md"))).toBe(
+      true
+    );
+    expect(existsSync(join(home, ".agents"))).toBe(false);
+    rmSync(home, { recursive: true, force: true });
+    rmSync(pkgRoot, { recursive: true, force: true });
+  });
+
+  it("uninstalling prime-agent leaves the shared ~/.agents copy dsh installed", () => {
     const home = mkdtempSync(join(tmpdir(), "hs-inst-skill-"));
     const pkgRoot = mkdtempSync(join(tmpdir(), "hs-pkg-"));
     mkdirSync(join(pkgRoot, "skill"), { recursive: true });
@@ -2848,7 +2849,7 @@ describe("skill install across skills-capable hosts", () => {
       qwenMcp: vi.fn(() => true),
     };
 
-    run(["install", "codex", "prime-agent"], ctx);
+    run(["install", "dsh", "prime-agent"], ctx);
     run(["uninstall", "prime-agent"], ctx);
 
     expect(existsSync(join(home, ".agents", "skills", "hindsight-coding-agent", "SKILL.md"))).toBe(
@@ -2912,7 +2913,7 @@ describe("devin-cli preflight", () => {
 });
 
 /**
- * Choosing where memory lives — Cloud, a self-hosted server, or a local daemon. Asked once, at
+ * Choosing the server. Asked once, at
  * install time; `--server` is the non-interactive form and the only one the suite uses (a prompt
  * would block on stdin).
  */
@@ -2926,43 +2927,17 @@ describe("server setup", () => {
     const override = join(ctx.home, "elsewhere", "config.json");
     vi.stubEnv("HINDSIGHT_CONFIG", override);
     try {
-      expect(run(["install", "claude-code", "--server", "daemon"], ctx)).toBe(0);
-      expect(readJson(override).serverMode).toBe("daemon");
+      expect(
+        run(
+          ["install", "claude-code", "--server", "self-hosted", "--api-url", "http://box:8888"],
+          ctx
+        )
+      ).toBe(0);
+      expect(readJson(override).apiUrl).toBe("http://box:8888");
       expect(existsSync(configPath(ctx))).toBe(false); // the default path stays untouched
     } finally {
       vi.unstubAllEnvs();
     }
-  });
-
-  it("uses the injected arrow-key picker when interactive, mapping index → mode", () => {
-    const ctx = makeCtx();
-    ctx.interactive = true;
-    ctx.hasUvx = () => true;
-    ctx.hasRust = () => true;
-    ctx.detectLlm = () => ({ provider: "openai", apiKey: "sk", source: "OPENAI_API_KEY" });
-    ctx.selectPrompt = vi.fn(() => 2); // third row = daemon
-    expect(run(["install", "claude-code"], ctx)).toBe(0);
-    expect(ctx.selectPrompt).toHaveBeenCalledOnce();
-    expect(readJson(configPath(ctx)).serverMode).toBe("daemon");
-  });
-
-  it("a cancelled picker leaves the server config untouched but still installs", () => {
-    const ctx = makeCtx();
-    ctx.interactive = true;
-    ctx.selectPrompt = () => null;
-    expect(run(["install", "claude-code"], ctx)).toBe(0);
-    expect(existsSync(configPath(ctx))).toBe(false);
-    expect(existsSync(join(ctx.home, ".claude", "settings.json"))).toBe(true);
-  });
-
-  it("--server daemon records the mode and leaves apiUrl to the port", () => {
-    const ctx = makeCtx();
-    ctx.hasUvx = () => true;
-    ctx.detectLlm = () => ({ provider: "openai", apiKey: "sk", source: "OPENAI_API_KEY" });
-    expect(run(["install", "claude-code", "--server", "daemon"], ctx)).toBe(0);
-    const cfg = readJson(configPath(ctx));
-    expect(cfg.serverMode).toBe("daemon");
-    expect(cfg.apiUrl).toBeUndefined();
   });
 
   it("--server self-hosted stores the URL", () => {
@@ -2976,9 +2951,7 @@ describe("server setup", () => {
     expect(readJson(configPath(ctx)).apiUrl).toBe("http://box:8888");
   });
 
-  // Without a URL the mode is unusable, and silently falling back to Cloud would send this user's
-  // prompts somewhere they did not choose.
-  it("self-hosted without a URL fails instead of falling back to Cloud", () => {
+  it("self-hosted without a URL fails, there being nothing to fall back to", () => {
     const ctx = makeCtx();
     const logs: string[] = [];
     ctx.log = (m) => logs.push(m);
@@ -2992,16 +2965,18 @@ describe("server setup", () => {
     const logs: string[] = [];
     ctx.log = (m) => logs.push(m);
     expect(run(["install", "claude-code", "--server", "hybrid"], ctx)).toBe(1);
-    expect(logs.join("\n")).toContain("cloud, self-hosted, daemon");
+    expect(logs.join("\n")).toContain("expected: self-hosted");
   });
 
-  // `--server daemon` puts a bare word in argv; without value-aware parsing it reads as a harness.
+  // `--server self-hosted` puts a bare word in argv; without value-aware parsing it reads as a harness.
   it("does not mistake a flag value for a harness name", () => {
     const ctx = makeCtx();
     const logs: string[] = [];
     ctx.log = (m) => logs.push(m);
-    expect(run(["install", "claude-code", "--server", "daemon"], ctx)).toBe(0);
-    expect(logs.join("\n")).not.toContain('unknown harness "daemon"');
+    expect(
+      run(["install", "claude-code", "--server", "self-hosted", "--api-url", "http://box:8888"], ctx)
+    ).toBe(0);
+    expect(logs.join("\n")).not.toContain("unknown harness");
   });
 
   // install is idempotent and routinely re-run; it must not silently rewrite a working setup.
@@ -3012,28 +2987,11 @@ describe("server setup", () => {
     expect(readJson(configPath(ctx)).apiUrl).toBe("http://mine:8888");
   });
 
-  it("warns when daemon prerequisites are missing, but still configures it", () => {
-    const ctx = makeCtx();
-    ctx.hasUvx = () => false;
-    ctx.hasRust = () => true;
-    ctx.detectLlm = () => undefined;
-    const logs: string[] = [];
-    ctx.log = (m) => logs.push(m);
-    // Advisory, not blocking: uv and an API key can both be installed after the fact.
-    expect(run(["install", "claude-code", "--server", "daemon"], ctx)).toBe(0);
-    const out = logs.join("\n");
-    expect(out).toContain("uv");
-    expect(out).toContain("OPENAI_API_KEY");
-    expect(readJson(configPath(ctx)).serverMode).toBe("daemon");
-  });
-
   // Coming from the old per-agent plugin, the endpoint is already a decision the user made.
-  // Defaulting to Cloud instead would quietly redirect their prompts to a different server.
-  it("adopts the old plugin's endpoint instead of asking or defaulting to Cloud", () => {
+  it("adopts the old plugin's endpoint instead of asking", () => {
     const ctx = makeCtx();
     ctx.readLegacy = () => ({
       harness: "claude-code",
-      serverMode: "self-hosted" as const,
       apiUrl: "http://legacy:8888",
       apiToken: "tok",
       source: "/home/u/.hindsight/claude-code.json",
@@ -3053,49 +3011,45 @@ describe("server setup", () => {
     const ctx = makeCtx();
     ctx.readLegacy = () => ({
       harness: "claude-code",
-      serverMode: "self-hosted" as const,
       apiUrl: "http://legacy:8888",
       source: "/x",
     });
-    expect(run(["install", "claude-code", "--server", "cloud", "--api-token", "tok"], ctx)).toBe(0);
-    const cfg = readJson(configPath(ctx));
-    expect(cfg.serverMode).toBe("cloud");
-    expect(cfg.apiUrl).toBeUndefined();
-  });
-
-  it("--server cloud stores the required token", () => {
-    const ctx = makeCtx();
     expect(
-      run(["install", "claude-code", "--server", "cloud", "--api-token", "sk-cloud"], ctx)
+      run(["install", "claude-code", "--server", "self-hosted", "--api-url", "http://mine:8888"], ctx)
     ).toBe(0);
-    const cfg = readJson(configPath(ctx));
-    expect(cfg.serverMode).toBe("cloud");
-    expect(cfg.apiToken).toBe("sk-cloud");
+    expect(readJson(configPath(ctx)).apiUrl).toBe("http://mine:8888");
   });
 
-  // A Cloud config without a token only surfaces later as 401s on the first session — refuse
-  // up front instead, like self-hosted without a URL.
-  it("--server cloud without a token fails instead of writing a config that 401s", () => {
+  it.each([
+    [["--server", "cloud", "--api-token", "t"]],
+    [["--server", "daemon"]],
+    [["--server", "self-hosted", "--api-url", "https://api.hindsight.vectorize.io"]],
+    [["--server", "self-hosted", "--api-url", "https://EU.Vectorize.IO./"]],
+    [["--server", "self-hosted", "--api-url", "not-a-url"]],
+  ])("refuses %j and writes nothing", (flags) => {
     const ctx = makeCtx();
-    const logs: string[] = [];
-    ctx.log = (m) => logs.push(m);
-    expect(run(["install", "claude-code", "--server", "cloud"], ctx)).toBe(1);
-    expect(logs.join("\n")).toContain("--api-token");
+    expect(run(["install", "claude-code", ...flags], ctx)).toBe(1);
     expect(existsSync(configPath(ctx))).toBe(false);
     expect(existsSync(join(ctx.home, ".claude", "settings.json"))).toBe(false);
   });
 
-  // litellm publishes no macOS wheel, so a Mac compiles it from source and needs cargo. Without
-  // this the failure surfaces minutes later, deep in a pip build log.
-  it("flags a missing Rust toolchain", () => {
+  it("wires the agent but configures no server when a script names none", () => {
     const ctx = makeCtx();
-    ctx.hasUvx = () => true;
-    ctx.hasRust = () => false;
-    ctx.detectLlm = () => ({ provider: "openai", apiKey: "sk", source: "OPENAI_API_KEY" });
-    const logs: string[] = [];
-    ctx.log = (m) => logs.push(m);
-    expect(run(["install", "claude-code", "--server", "daemon"], ctx)).toBe(0);
-    expect(logs.join("\n")).toContain("rustup");
+    expect(run(["install", "claude-code"], ctx)).toBe(0);
+    expect(existsSync(configPath(ctx))).toBe(false);
+    expect(existsSync(join(ctx.home, ".claude", "settings.json"))).toBe(true);
+  });
+
+  it.each(["cloud", "daemon"])("treats a config still in %s mode as unconfigured", (serverMode) => {
+    const ctx = makeCtx();
+    writeJsonAt(configPath(ctx), { serverMode, apiToken: "old" });
+    expect(
+      run(["install", "claude-code", "--server", "self-hosted", "--api-url", "http://box:8888"], ctx)
+    ).toBe(0);
+    expect(readJson(configPath(ctx))).toMatchObject({
+      serverMode: "self-hosted",
+      apiUrl: "http://box:8888",
+    });
   });
 });
 

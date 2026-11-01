@@ -1,13 +1,13 @@
 """
-OpenTelemetry distributed tracing instrumentation for Hindsight API.
+Tracing surface for Hindsight API, with span export removed.
 
-This module provides tracing for:
-- LLM API calls with full prompts/completions following GenAI semantic conventions
-- Token usage and model information
-- Error tracking and finish reasons
+Upstream exported spans, full prompts and completions included, to any OTLP
+backend. This fork exports nothing: initialization is a permanent no-op, the
+HINDSIGHT_API_OTEL_* variables do nothing, and every span helper stays on its
+no-op path so that callers need no edits and upstream merges stay cheap.
 
-Tracing is conditional and disabled by default. When enabled, traces are exported
-to Langfuse (or any OTLP-compatible backend) via OTLP HTTP protocol.
+get_span_recorder() is still live: it feeds the llm_trace table in the local
+database, which is unrelated to export.
 """
 
 import json
@@ -154,65 +154,8 @@ def initialize_tracing(
     deployment_environment: str = "development",
 ) -> None:
     """
-    Initialize OpenTelemetry tracing with OTLP exporter.
-
-    Args:
-        service_name: Name of the service for resource attributes
-        endpoint: OTLP endpoint URL (e.g., https://cloud.langfuse.com/api/public/otel)
-        headers: Optional headers in format "key1=value1,key2=value2"
-        deployment_environment: Deployment environment (e.g., development, staging, production)
+    Does nothing: this fork exports no traces. Kept so that callers need no edits.
     """
-    global _tracer, _tracing_enabled, _provider
-
-    # Imported lazily: __version__ is defined at the end of hindsight_api/__init__.py,
-    # after the imports that pull in this module.
-    # The SDK and OTLP exporter load here, not at module import: tracing is off by
-    # default, and every process would otherwise pay for them on startup.
-    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-    from opentelemetry.sdk.resources import Resource
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor
-
-    from hindsight_api import __version__
-
-    # Create resource with service information
-    resource = Resource.create(
-        {
-            "service.name": service_name,
-            "service.version": __version__,
-            "deployment.environment.name": deployment_environment,
-        }
-    )
-
-    # Parse headers
-    headers_dict = {}
-    if headers:
-        for pair in headers.split(","):
-            if "=" in pair:
-                key, value = pair.split("=", 1)
-                headers_dict[key.strip()] = value.strip()
-
-    # Create OTLP HTTP exporter
-    # Note: Langfuse expects /v1/traces path appended to base endpoint
-    otlp_endpoint = endpoint if endpoint.endswith("/v1/traces") else f"{endpoint}/v1/traces"
-    otlp_exporter = OTLPSpanExporter(
-        endpoint=otlp_endpoint,
-        headers=headers_dict,
-    )
-
-    # Create tracer provider with batch processor
-    provider = TracerProvider(resource=resource)
-    provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
-
-    # Set global tracer provider
-    trace.set_tracer_provider(provider)
-
-    # Get tracer for this application
-    _tracer = trace.get_tracer(__name__)
-    _tracing_enabled = True
-    _provider = provider
-
-    logger.info(f"Tracing initialized: endpoint={otlp_endpoint}, service={service_name}")
 
 
 def initialize_tracing_from_config(
@@ -221,53 +164,14 @@ def initialize_tracing_from_config(
     default_service_name: str | None = None,
 ) -> bool:
     """
-    Bootstrap tracing from a HindsightConfig, for any process entrypoint.
-
-    Both the API (FastAPI lifespan) and the standalone worker call this, so a
-    deployment that sets HINDSIGHT_API_OTEL_* gets traces from every process
-    that does work rather than only from the one serving HTTP (issue #3614).
-
-    Failures are logged and swallowed: tracing must never keep a process from
-    starting.
-
-    Args:
-        config: Resolved Hindsight configuration (raw dataclass or the static proxy).
-        default_service_name: Service name to use when HINDSIGHT_API_OTEL_SERVICE_NAME
-            is not set in the environment. Lets the worker report itself as
-            "hindsight-worker" — matching the name it already reports for metrics —
-            without overriding an operator's explicit choice.
+    Does nothing, whatever HINDSIGHT_API_OTEL_* say: this fork exports no traces.
 
     Returns:
-        True when tracing was initialized, False otherwise.
+        Always False, meaning tracing was not initialized.
     """
-    from .config import DEFAULT_OTEL_SERVICE_NAME
-
-    if not config.otel_traces_enabled:
-        return False
-
-    if not config.otel_exporter_otlp_endpoint:
-        logger.warning("OTEL tracing enabled but no endpoint configured. Tracing disabled.")
-        return False
-
-    # config.otel_service_name is None when the operator named nothing, so an explicit
-    # name still beats the caller's per-process default without this having to consult
-    # the environment a second time.
-    service_name = config.otel_service_name or default_service_name or DEFAULT_OTEL_SERVICE_NAME
-
-    try:
-        initialize_tracing(
-            service_name=service_name,
-            endpoint=config.otel_exporter_otlp_endpoint,
-            headers=config.otel_exporter_otlp_headers,
-            deployment_environment=config.otel_deployment_environment,
-        )
-        create_span_recorder()
-        logger.info("OpenTelemetry tracing enabled and configured")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to initialize tracing: {e}")
-        logger.warning("Continuing without tracing")
-        return False
+    if config.otel_traces_enabled:
+        logger.warning("HINDSIGHT_API_OTEL_TRACES_ENABLED is ignored: this fork exports no traces")
+    return False
 
 
 def shutdown_tracing() -> None:

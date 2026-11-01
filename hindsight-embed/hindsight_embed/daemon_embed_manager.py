@@ -34,6 +34,14 @@ logger = logging.getLogger(__name__)
 console = Console(stderr=True)
 
 
+class ApiUnavailableError(RuntimeError):
+    """There is no local hindsight-api to run, and this fork does not fetch one from PyPI."""
+
+
+class ControlPlaneUnavailableError(RuntimeError):
+    """There is no local control plane to run, and this fork does not fetch one from npm."""
+
+
 def _parse_float_env(name: str, default: float) -> float:
     """Parse a float environment variable, falling back on invalid values."""
     try:
@@ -121,8 +129,7 @@ LOOPBACK_HOSTS = ("127.0.0.1", "::1")
 # ours. Selecting the victim purely by "who holds the port" killed unrelated
 # services that happened to be on the same port (issue #3520).
 DAEMON_PROCESS_MARKERS = ("hindsight-api", "hindsight_api")
-# The control plane runs as `npx @vectorize-io/hindsight-control-plane` (or
-# `node .../hindsight-control-plane/bin/cli.js` in the monorepo), but Next.js
+# The control plane runs as `node .../hindsight-control-plane/bin/cli.js`, but Next.js
 # rewrites argv to "next-server (vX.Y.Z)" once it is serving, so the package
 # name is not always still visible in the command line.
 UI_PROCESS_MARKERS = ("hindsight-control-plane", "next-server", "next start")
@@ -154,16 +161,15 @@ _PARENT_INTERPRETER_ENV = ("PYTHONPATH", "PYTHONHOME", "PYTHONSAFEPATH", "VIRTUA
 def _runs_a_foreign_interpreter(cmd: list[str]) -> bool:
     """Whether *cmd* launches hindsight-api on an interpreter that is not ours.
 
-    True for every uv-launched form — the ``uvx hindsight-api@<version>`` fallback and the
-    monorepo ``uv run --project <api-slim> ... hindsight-api`` dev command — because uv resolves
-    an environment of its own, usually on a different Python than the caller. False for the
+    True for the monorepo ``uv run --project <api-slim> ... hindsight-api`` dev command, because
+    uv resolves an environment of its own, usually on a different Python than the caller. False for the
     installed-binary paths, which are a single executable from an environment we already share.
 
     Matched on the basename, not the literal string: the sibling candidate paths in
     ``_find_api_command`` are returned resolved (``[str(candidate)]``), so a future change that
     resolves the launcher the same way must not silently stop scrubbing the env.
     """
-    return Path(cmd[0]).stem in {"uv", "uvx"}
+    return Path(cmd[0]).stem == "uv"
 
 
 def _strip_parent_interpreter_env(env: dict[str, str]) -> dict[str, str]:
@@ -483,15 +489,19 @@ class DaemonEmbedManager(EmbedManager):
         if find_spec("sentence_transformers") is not None:
             return True
         logger.warning(
-            "Installed hindsight-api binary is missing local ML dependencies; "
-            "falling back to uvx hindsight-api for the local daemon. Set "
+            "Installed hindsight-api binary is missing local ML dependencies, "
+            "so it cannot run the local daemon. Set "
             "HINDSIGHT_API_EMBEDDINGS_PROVIDER and HINDSIGHT_API_RERANKER_PROVIDER "
             "to non-local providers to use a slim install."
         )
         return False
 
     def _find_api_command(self, api_version: str, env: Mapping[str, str] | None = None) -> list[str]:
-        """Find the command to run hindsight-api (api_version used only for the uvx fallback)."""
+        """Find the command to run hindsight-api.
+
+        ``api_version`` is unused here. Upstream passes it to uvx, which this fork does not run:
+        the published package carries none of this fork's enforcement.
+        """
         # Check if we're in development mode
         dev_command = self._dev_api_command()
         if dev_command is not None:
@@ -524,15 +534,17 @@ class DaemonEmbedManager(EmbedManager):
             candidate = package_root / bin_dir / binary_name
             if candidate.exists():
                 # A hindsight-api binary bundled into a --target layout is a
-                # deliberate slim-bundle install; use it unconditionally. Falling
-                # back to uvx here reintroduces issue #1240 (the Windows embed
-                # smoke test enforces this). The #2676 "missing local ML deps ->
-                # uvx" fallback intentionally applies only to the sysconfig-scripts
-                # path above (standard venv installs), not to a --target bundle.
+                # deliberate slim-bundle install; use it unconditionally (the Windows
+                # embed smoke test enforces this, issue #1240). The #2676 local ML
+                # check intentionally applies only to the sysconfig-scripts path
+                # above (standard venv installs), not to a --target bundle.
                 return [str(candidate)]
 
-        # Fall back to uvx for the installed version (resolved by the caller).
-        return ["uvx", f"hindsight-api@{api_version}"]
+        raise ApiUnavailableError(
+            "hindsight-api is unavailable: this fork does not download it. Install this fork's "
+            "hindsight-api next to hindsight-embed, with its local-ml extra for the default local "
+            "embeddings and reranker, or run hindsight-embed from a checkout of this repository."
+        )
 
     @staticmethod
     def _is_port_in_use(port: int) -> bool:
@@ -1018,7 +1030,23 @@ class DaemonEmbedManager(EmbedManager):
         # too was redundant, and API versions older than the Popen-based
         # daemonize() (#1519) fork on it, which can deadlock native libraries
         # on macOS.
-        cmd = self._find_api_command(self._component_version(profile, "HINDSIGHT_EMBED_API_VERSION"), env=env) + [
+        try:
+            api_command = self._find_api_command(
+                self._component_version(profile, "HINDSIGHT_EMBED_API_VERSION"), env=env
+            )
+        except ApiUnavailableError as e:
+            console.print(
+                Panel(
+                    Text(str(e), style="red"),
+                    title="[bold red]✗ Daemon Unavailable[/bold red]",
+                    border_style="red",
+                    padding=(1, 2),
+                )
+            )
+            console.print()
+            return False
+
+        cmd = api_command + [
             "--idle-timeout",
             str(idle_timeout),
             "--port",
@@ -1215,26 +1243,21 @@ class DaemonEmbedManager(EmbedManager):
             logger.debug(f"Failed to register profile '{profile}' in metadata: {e}")
 
     def _find_ui_command(self, cp_version: str) -> list[str]:
-        """Find the command to run the control plane UI (cp_version used only for the npx fallback)."""
-        import shutil
+        """Find the command to run the control plane UI from a checkout of this repository.
 
+        ``cp_version`` is unused here. Upstream passes it to npx, which this fork does not run:
+        the published package carries none of this fork's changes.
+        """
         # Check if we're in development mode (monorepo)
         dev_cp_path = Path(__file__).parent.parent.parent / "hindsight-control-plane"
         cli_js = dev_cp_path / "bin" / "cli.js"
         if cli_js.exists():
             return ["node", str(cli_js)]
 
-        # Use npx to run the published control plane package (version resolved by the caller).
-        # `npx` prompts before installing missing packages on first run unless `-y` is set.
-        # The UI starts in the background with stdout/stderr redirected to a log file, so an
-        # interactive prompt would be invisible to users and the health-check loop would time out.
-        # On Windows, detached processes may not inherit the parent's PATH, so resolve the
-        # absolute path to npx to avoid "Command not found" errors.
-        npx_path = shutil.which("npx")
-        if npx_path is None:
-            # Fallback to bare command so the FileNotFoundError handler can report it cleanly
-            return ["npx", "-y", f"@vectorize-io/hindsight-control-plane@{cp_version}"]
-        return [npx_path, "-y", f"@vectorize-io/hindsight-control-plane@{cp_version}"]
+        raise ControlPlaneUnavailableError(
+            "The control plane UI is unavailable: this fork does not download it from npm. "
+            "Run hindsight-embed from a checkout of this repository, or use the Docker image."
+        )
 
     def get_ui_url(self, profile: str, ui_port: int | None = None) -> str:
         """Get the URL for the UI serving this profile (callers render it for display)."""
@@ -1320,7 +1343,21 @@ class DaemonEmbedManager(EmbedManager):
         ui_log.parent.mkdir(parents=True, exist_ok=True)
 
         # Build command
-        cmd = self._find_ui_command(self._component_version(profile, "HINDSIGHT_EMBED_CP_VERSION")) + [
+        try:
+            ui_command = self._find_ui_command(self._component_version(profile, "HINDSIGHT_EMBED_CP_VERSION"))
+        except ControlPlaneUnavailableError as e:
+            console.print(
+                Panel(
+                    Text(str(e), style="red"),
+                    title="[bold red]✗ UI Unavailable[/bold red]",
+                    border_style="red",
+                    padding=(1, 2),
+                )
+            )
+            console.print()
+            return False
+
+        cmd = ui_command + [
             "--port",
             str(ui_port),
             "--hostname",
@@ -1389,7 +1426,7 @@ class DaemonEmbedManager(EmbedManager):
 
         except FileNotFoundError:
             error_msg = (
-                f"Command not found: {cmd[0]}\nFull command: {' '.join(cmd)}\n\nInstall Node.js and npx to run the UI."
+                f"Command not found: {cmd[0]}\nFull command: {' '.join(cmd)}\n\nInstall Node.js to run the UI."
             )
             console.print(
                 Panel(

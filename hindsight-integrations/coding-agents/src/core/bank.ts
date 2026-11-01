@@ -239,9 +239,8 @@ function lookupDirectories(config: BankConfig, directory: string, sessionRoot = 
 /**
  * Whether memory may run for this directory at all.
  *
- * Off by default: without `optInOnly` every project gets memory, which is what makes the plugin
- * zero-setup. With it, the plugin stays inert — no bank, no retain, no seed — unless the directory
- * was named on purpose, which means one of:
+ * `optInOnly` is on by default, and with it the plugin stays inert — no bank, no retain, no seed —
+ * unless the directory was named on purpose, which means one of:
  *
  *   - it is under an `optInPaths` entry (prefix-matched, so approving a directory approves the
  *     repos beneath it while each keeps its own dynamic bank), or

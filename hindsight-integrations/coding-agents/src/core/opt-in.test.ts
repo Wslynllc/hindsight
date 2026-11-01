@@ -30,10 +30,11 @@ describe("optInOnly", () => {
     delete process.env.CLAUDE_PROJECT_DIR;
   });
 
-  it("allows everything when it is off — the zero-setup default is unchanged", () => {
-    const cfg = resolveConfig({});
-    expect(isOptedIn(cfg, approved)).toBe(true);
-    expect(isOptedIn(cfg, other)).toBe(true);
+  it("is on by default, and only a literal false turns it off", () => {
+    expect(isOptedIn(resolveConfig({}), approved)).toBe(false);
+    expect(isOptedIn(resolveConfig({ optInOnly: "no" as never }), approved)).toBe(false);
+    expect(isOptedIn(resolveConfig({ optInOnly: 0 as never }), approved)).toBe(false);
+    expect(isOptedIn(resolveConfig({ optInOnly: false }), other)).toBe(true);
   });
 
   it("approves a listed directory and the repos beneath it", () => {
@@ -238,7 +239,11 @@ describe("optInOnly", () => {
   });
 
   it("renders an unlisted project inert through the gate every entry point already checks", () => {
-    const cfg = resolveConfig({ optInOnly: true, optInPaths: [approved] });
+    const cfg = resolveConfig({
+      apiUrl: "http://server.test",
+      optInOnly: true,
+      optInPaths: [approved],
+    });
     const inert = applyBankConfig(cfg, deriveBankId(cfg, other, "codex"), other);
     expect(inert.cfg.disabled).toBe(true);
 

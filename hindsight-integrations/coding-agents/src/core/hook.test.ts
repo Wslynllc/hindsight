@@ -2,11 +2,14 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveConfig } from "./config";
+import { type RawConfig, resolveConfig as resolveDefaults } from "./config";
 import { buildHookOutput, runHook } from "./hook";
 import { diagFilePath } from "./diag";
 import { ReflectError } from "./hindsight";
 import { buildReflectQuery } from "./inject";
+
+/** This suite covers the reflect path, which is opt-in. */
+const resolveConfig = (raw: RawConfig = {}) => resolveDefaults({ autoInject: "reflect", ...raw });
 
 let root: string;
 let cacheFile: string;
@@ -656,7 +659,7 @@ describe("buildHookOutput", () => {
   });
 
   it("autoReflect false: never calls reflect, injects no memory block", async () => {
-    const cfg = resolveConfig({ autoReflect: false });
+    const cfg = resolveDefaults({ autoReflect: false });
     const client = makeClient();
     const out = await buildHookOutput({
       harness: "claude-code",
@@ -668,7 +671,7 @@ describe("buildHookOutput", () => {
     expect(client.reflect).not.toHaveBeenCalled();
     expect(out.context ?? "").not.toContain("<hindsight_memory>");
     // Tool-only mode's pull trigger: the roster refresh must carry the pages-first rule.
-    const cfg2 = resolveConfig({ autoReflect: false, pageRefreshEveryTurns: 1 });
+    const cfg2 = resolveDefaults({ autoReflect: false, pageRefreshEveryTurns: 1 });
     const out2 = await buildHookOutput({
       harness: "claude-code",
       prompt: "next",

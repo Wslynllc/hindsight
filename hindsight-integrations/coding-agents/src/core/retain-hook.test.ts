@@ -29,7 +29,11 @@ vi.mock("node:fs", async (importOriginal) => {
 let rawConfig: RawConfig = {};
 vi.mock("./config", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./config")>();
-  return { ...actual, loadConfig: () => actual.resolveConfig(rawConfig) };
+  return {
+    ...actual,
+    loadConfig: () =>
+      actual.resolveConfig({ apiUrl: "http://server.test", optInOnly: false, ...rawConfig }),
+  };
 });
 
 let root: string;
@@ -875,8 +879,7 @@ describe("runRetainHook honors retainSessions", () => {
 });
 
 /**
- * Family-wide guard, in the shape of `daemon.test.ts`'s "every harness entrypoint reaches a
- * daemon". #3596 was not a broken line of code but a MISSING one: the persistent-plugin path
+ * Family-wide guard. #3596 was not a broken line of code but a MISSING one: the persistent-plugin path
  * honored `retainSessions` and the hook path silently didn't, and no test failed because the path
  * that forgot is by definition the one nobody wrote a test for. So assert over the whole family:
  * every module that puts a conversation in the bank must consult the flag — the live write-back

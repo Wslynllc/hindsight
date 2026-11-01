@@ -849,3 +849,14 @@ class TestProcessCommandLine:
         from hindsight_embed.daemon_embed_manager import DAEMON_PROCESS_MARKERS
 
         assert DaemonEmbedManager._process_matches(4_294_967_000, DAEMON_PROCESS_MARKERS) is False
+
+
+def test_a_missing_cli_fails_clearly_and_downloads_nothing(capsys):
+    with (
+        patch.object(daemon_client, "find_cli_binary", return_value=None),
+        patch("subprocess.run") as run,
+    ):
+        assert daemon_client.run_cli(["memory", "recall"], {}, profile="work") == 1
+
+    run.assert_not_called()
+    assert "does not download it" in capsys.readouterr().err

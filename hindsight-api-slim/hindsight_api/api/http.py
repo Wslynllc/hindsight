@@ -9,7 +9,6 @@ import asyncio
 import gc
 import json
 import logging
-import os
 import re
 import time
 import traceback
@@ -1359,7 +1358,7 @@ class FileRetainMetadata(BaseModel):
     parser: str | list[str] | None = Field(
         default=None,
         description="Parser or ordered fallback chain for this file (overrides request-level parser). "
-        "E.g. 'iris' or ['iris', 'markitdown'].",
+        "E.g. 'markitdown' or ['markitdown'].",
     )
     strategy: str | None = Field(
         default=None,
@@ -1387,10 +1386,10 @@ class FileRetainRequest(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "parser": "iris",
+                "parser": "markitdown",
                 "files_metadata": [
                     {"document_id": "report_2024", "tags": ["quarterly"]},
-                    {"context": "meeting notes", "parser": ["iris", "markitdown"]},
+                    {"context": "meeting notes", "parser": ["markitdown"]},
                 ],
             }
         }
@@ -1399,7 +1398,7 @@ class FileRetainRequest(BaseModel):
     parser: str | list[str] | None = Field(
         default=None,
         description="Default parser or ordered fallback chain for all files in this request. "
-        "E.g. 'markitdown' or ['iris', 'markitdown']. Falls back to server default if not set. "
+        "E.g. 'markitdown' or ['markitdown']. Falls back to server default if not set. "
         "Per-file 'parser' in files_metadata takes precedence over this value.",
     )
     files_metadata: list[FileRetainMetadata] | None = Field(
@@ -4557,49 +4556,7 @@ def _name_server_span_after_operation(span: "Span", scope: dict[str, Any]) -> No
 
 
 def _instrument_app_for_tracing(app: FastAPI, config: HindsightConfig | StaticConfigProxy) -> None:
-    """
-    Make incoming requests continue the caller's trace instead of starting a new one.
-
-    The ASGI instrumentation extracts W3C traceparent/tracestate from the request
-    headers and opens a SERVER span; every span the engine opens while handling
-    that request (hindsight.recall, hindsight.retain, the GenAI child spans, ...)
-    then nests under the caller's trace through the ambient context, with no
-    changes at those call sites (issue #3604). Requests without a traceparent
-    still start their own root trace, so this is backwards compatible.
-
-    Must run here rather than in the lifespan: instrument_app patches
-    Starlette.build_middleware_stack, which is built before the lifespan handler
-    runs. The tracer it captures is a proxy that resolves lazily, so the provider
-    installed later by initialize_tracing_from_config is picked up correctly.
-    """
-    if not config.otel_traces_enabled or not config.otel_exporter_otlp_endpoint:
-        return
-
-    try:
-        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-
-        # Probe and metrics scrapes would otherwise dominate the trace stream.
-        # OTEL_PYTHON_FASTAPI_EXCLUDED_URLS, when set, takes precedence.
-        excluded_urls = os.getenv("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS") or "health,metrics"
-        FastAPIInstrumentor.instrument_app(
-            app,
-            excluded_urls=excluded_urls,
-            # Fires right after the server span is created, and the ASGI
-            # instrumentation never renames it afterwards (the route is already
-            # resolved at creation), so an update_name() here is the final name.
-            server_request_hook=_name_server_span_after_operation,
-            # Two reasons, both load-bearing. Per-ASGI-message spans triple the
-            # span count per request while saying nothing the request span
-            # doesn't. And excluding "receive" makes the instrumentation pass the
-            # raw receive callable through untouched instead of wrapping it,
-            # which is what keeps ClientDisconnectCancellationMiddleware able to
-            # observe an abandoned request (issue #2122).
-            exclude_spans=["receive", "send"],
-        )
-        logging.info("OpenTelemetry HTTP server instrumentation enabled (trace context propagation)")
-    except Exception as e:
-        logging.error(f"Failed to instrument HTTP server for tracing: {e}")
-        logging.warning("Continuing without incoming trace-context propagation")
+    """Does nothing: this fork exports no traces, so there is no trace for a request to continue."""
 
 
 def _register_routes(app: FastAPI):
@@ -9647,7 +9604,7 @@ def _register_routes(app: FastAPI):
         "**Parser selection:**\n"
         "- Set `parser` in the request body to override the server default for all files.\n"
         "- Set `parser` inside a `files_metadata` entry for per-file control.\n"
-        "- Pass a list (e.g. `['iris', 'markitdown']`) to define an ordered fallback chain — "
+        "- Pass a list (e.g. `['markitdown']`) to define an ordered fallback chain — "
         "each parser is tried in sequence until one succeeds.\n"
         "- Falls back to the server default (`HINDSIGHT_API_FILE_PARSER`) if not specified.\n"
         "- Only parsers enabled on the server may be requested; others return HTTP 400.",

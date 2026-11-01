@@ -568,7 +568,7 @@ export const HOOK_HARNESSES: Record<HookHarnessName, HookHarnessSpec> = {
     },
     // Droid emits Notification(idle_prompt), not Stop, after user cancellation. Reusing the
     // idempotent retain entry point captures that final partial turn; its event gate ignores every
-    // other notification type before config or daemon work begins.
+    // other notification type before config work begins.
     additionalHooks: [{ event: "Notification", entry: "droid-stop-hook.js", timeout: 60 }],
     sessionStart: standardSessionStart("factory-droid"),
     prompt: droidPrompt,
@@ -717,7 +717,7 @@ export const HOOK_HARNESSES: Record<HookHarnessName, HookHarnessSpec> = {
       }),
       // Kimi runs SessionStart hooks for their side effects only: it awaits the trigger and drops
       // the result, so nothing emitted here can reach the model or the terminal. Installed for the
-      // seed/daemon/session-root work runSessionStartHook does, and silent like antigravity-cli's.
+      // seed/session-root work runSessionStartHook does, and silent like antigravity-cli's.
       emit: () => ({}),
     },
     prompt: {

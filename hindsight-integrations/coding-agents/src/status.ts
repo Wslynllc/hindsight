@@ -7,7 +7,7 @@
  * usage: node status.js --repo <path> [--bank <id>] [--harness <name>] [--api-url U] [--api-token X] [--config path]
  */
 import { deriveBankIdOrSkip } from "./core/bank";
-import { applyBankConfig, loadConfig } from "./core/config";
+import { applyBankConfig, loadConfig, usableApiUrl } from "./core/config";
 import { HindsightClient } from "./core/hindsight";
 import { syncStatus } from "./core/status";
 
@@ -31,8 +31,13 @@ if (!BANK) {
 const resolved0 = BANK ? applyBankConfig(cfg0, BANK, REPO) : { cfg: cfg0, bankId: BANK };
 const cfg = resolved0.cfg;
 const FINAL_BANK = resolved0.bankId ?? BANK;
+const API_URL = usableApiUrl(arg("api-url") ?? cfg.apiUrl);
+if (!API_URL) {
+  console.error("status: no usable server — set apiUrl or pass --api-url");
+  process.exit(1);
+}
 const client = new HindsightClient({
-  apiUrl: arg("api-url") ?? cfg.apiUrl,
+  apiUrl: API_URL,
   apiToken: arg("api-token") ?? cfg.apiToken,
   bank: FINAL_BANK!,
   maxParallelRetains: cfg.maxParallelRetains,

@@ -40,29 +40,19 @@ describe("readLegacyEndpoint", () => {
     const e = readLegacyEndpoint(
       homeWith({ hindsightApiUrl: "http://box:8888", hindsightApiToken: "t" })
     );
-    expect(e?.serverMode).toBe("self-hosted");
     expect(e?.apiUrl).toBe("http://box:8888");
     expect(e?.apiToken).toBe("t");
   });
 
-  it("recognises the Cloud URL as cloud, not self-hosted", () => {
-    const e = readLegacyEndpoint(
-      homeWith({ hindsightApiUrl: "https://api.hindsight.vectorize.io" })
-    );
-    expect(e?.serverMode).toBe("cloud");
+  it("does not carry the vendor's hosted endpoint over", () => {
+    expect(
+      readLegacyEndpoint(homeWith({ hindsightApiUrl: "https://api.hindsight.vectorize.io/" }))
+    ).toBeUndefined();
   });
 
-  // The old plugin treated an empty URL as "use the local daemon" (daemon.py:get_api_url), so a
-  // config that never sets one describes daemon mode rather than an unconfigured user.
-  it("reads an absent URL as daemon mode", () => {
-    const e = readLegacyEndpoint(homeWith({ retainMode: "full-session" }));
-    expect(e?.serverMode).toBe("daemon");
-    expect(e?.apiUrl).toBeUndefined();
-  });
-
-  it("carries a non-default daemon port, since in daemon mode the port is the endpoint", () => {
-    expect(readLegacyEndpoint(homeWith({ apiPort: 9100 }))?.apiPort).toBe(9100);
-    expect(readLegacyEndpoint(homeWith({ apiPort: 9077 }))?.apiPort).toBeUndefined();
+  // The old plugin's empty URL meant a local daemon, which this build does not have.
+  it("carries nothing when the old plugin names no URL", () => {
+    expect(readLegacyEndpoint(homeWith({ retainMode: "full-session", apiPort: 9100 }))).toBeUndefined();
   });
 
   // A config we cannot parse is not a decision we can honour — fall through to the normal flow
@@ -76,7 +66,7 @@ describe("readLegacyEndpoint", () => {
     const e = readLegacyEndpoint(
       homeWith({ hindsightApiUrl: "http://box:8888", recallBudget: "high", retainMode: "chunked" })
     );
-    expect(Object.keys(e ?? {}).sort()).toEqual(["apiUrl", "harness", "serverMode", "source"]);
+    expect(Object.keys(e ?? {}).sort()).toEqual(["apiUrl", "harness", "source"]);
   });
 
   it("reads the Codex plugin's config too", () => {

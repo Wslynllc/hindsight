@@ -5,10 +5,10 @@
  * Two modes of operation:
  *
  *   1. Interactive — no flags, just run `hindsight-openclaw-setup`. Walks the
- *      user through picking a mode (Cloud / External API / Embedded daemon)
+ *      user through picking a mode (External API / Embedded daemon)
  *      via @clack/prompts and writes openclaw.json.
  *
- *   2. Non-interactive — pass `--mode cloud|api|embedded` plus the relevant
+ *   2. Non-interactive — pass `--mode api|embedded` plus the relevant
  *      flags for that mode. No prompts, intended for CI and scripted installs.
  *
  * Scanner-safe: does not import subprocess APIs and does not read environment
@@ -21,14 +21,11 @@ import { resolve } from "path";
 import { fileURLToPath } from "url";
 import {
   DEFAULT_OPENCLAW_CONFIG_PATH,
-  HINDSIGHT_CLOUD_URL,
   NO_KEY_PROVIDERS,
   type ApiSetupInput,
-  type CloudSetupInput,
   type EmbeddedSetupInput,
   type SetupMode,
   applyApiMode,
-  applyCloudMode,
   applyEmbeddedMode,
   ensurePluginConfig,
   isValidEnvVarName,
@@ -36,9 +33,9 @@ import {
   maskSecret,
   saveConfig,
   summarizeApi,
-  summarizeCloud,
   summarizeEmbedded,
 } from "./setup-lib.js";
+import { isVendorHosted, VENDOR_HOSTED_REFUSED } from "./vendor-host.js";
 
 // ---------------------------------------------------------------------------
 // CLI parsing
@@ -63,8 +60,8 @@ function usage(): string {
   return [
     "Usage: hindsight-openclaw-setup [options] [config-path]",
     "",
-    "Interactive mode (no flags): walks through a TUI picker for Cloud /",
-    "External API / Embedded daemon and writes the resulting plugin config",
+    "Interactive mode (no flags): walks through a TUI picker for External API /",
+    "Embedded daemon and writes the resulting plugin config",
     `to ${DEFAULT_OPENCLAW_CONFIG_PATH} (or the positional config-path arg).`,
     "",
     "Non-interactive mode: pass --mode and the relevant flags to skip the",
@@ -72,13 +69,7 @@ function usage(): string {
     "",
     "Options:",
     "  --config-path <path>    Path to openclaw.json (default: ~/.openclaw/openclaw.json)",
-    "  --mode <mode>           cloud | api | embedded (enables non-interactive mode)",
-    "",
-    "Cloud mode (must pass exactly one of --token or --token-env):",
-    `  --api-url <url>         Override the Hindsight Cloud URL (default: ${HINDSIGHT_CLOUD_URL})`,
-    "  --token <value>         Store the token inline in openclaw.json (simple)",
-    "  --token-env <VAR>       Reference an env var instead — resolved at startup",
-    "                          via SecretRef (keeps the secret off disk)",
+    "  --mode <mode>           api | embedded (enables non-interactive mode)",
     "",
     "External API mode (token is optional; pass at most one of --token / --token-env / --no-token):",
     "  --api-url <url>         Hindsight API URL (required)",
@@ -96,8 +87,6 @@ function usage(): string {
     "",
     "Examples:",
     "  hindsight-openclaw-setup",
-    "  hindsight-openclaw-setup --mode cloud --token hsk_...",
-    "  hindsight-openclaw-setup --mode cloud --token-env HINDSIGHT_CLOUD_TOKEN",
     "  hindsight-openclaw-setup --mode api --api-url https://mcp.hindsight.example.com --no-token",
     "  hindsight-openclaw-setup --mode embedded --provider openai --api-key-env OPENAI_API_KEY",
     "  hindsight-openclaw-setup --mode embedded --provider claude-code",
@@ -127,8 +116,8 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
         break;
       case "--mode": {
         const value = next();
-        if (value !== "cloud" && value !== "api" && value !== "embedded") {
-          throw new Error(`invalid --mode: ${value} (expected cloud | api | embedded)`);
+        if (value !== "api" && value !== "embedded") {
+          throw new Error(`invalid --mode: ${value} (expected api | embedded)`);
         }
         args.mode = value;
         break;
@@ -174,23 +163,6 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
 // ---------------------------------------------------------------------------
 // Non-interactive execution
 // ---------------------------------------------------------------------------
-
-function buildCloudInput(args: ParsedCliArgs): CloudSetupInput {
-  if (!args.token && !args.tokenEnv) {
-    throw new Error("--mode cloud requires --token <value> or --token-env <VAR>");
-  }
-  if (args.token && args.tokenEnv) {
-    throw new Error("--token and --token-env are mutually exclusive — pick one");
-  }
-  if (args.tokenEnv && !isValidEnvVarName(args.tokenEnv)) {
-    throw new Error(`--token-env must be an UPPER_SNAKE_CASE env var name, got: ${args.tokenEnv}`);
-  }
-  return {
-    apiUrl: args.apiUrl,
-    token: args.token,
-    tokenEnvVar: args.tokenEnv,
-  };
-}
 
 function buildApiInput(args: ParsedCliArgs): ApiSetupInput {
   if (!args.apiUrl) {
@@ -252,11 +224,7 @@ export async function runNonInteractive(
   const pluginConfig = ensurePluginConfig(cfg);
 
   let summary: string;
-  if (args.mode === "cloud") {
-    const input = buildCloudInput(args);
-    applyCloudMode(pluginConfig, input);
-    summary = summarizeCloud(input);
-  } else if (args.mode === "api") {
+  if (args.mode === "api") {
     const input = buildApiInput(args);
     applyApiMode(pluginConfig, input);
     summary = summarizeApi(input);
@@ -307,44 +275,6 @@ async function promptInlineSecretWithReuse(message: string, existing: unknown): 
   return value as string;
 }
 
-async function promptCloud(pluginConfig: Record<string, unknown>): Promise<string> {
-  const existingUrl =
-    typeof pluginConfig.hindsightApiUrl === "string"
-      ? (pluginConfig.hindsightApiUrl as string).trim()
-      : "";
-  const currentUrl = existingUrl || HINDSIGHT_CLOUD_URL;
-  const useCurrentUrl = await p.confirm({
-    message:
-      existingUrl && existingUrl !== HINDSIGHT_CLOUD_URL
-        ? `Reuse the configured Cloud URL (${currentUrl})?`
-        : `Use the default Hindsight Cloud URL (${HINDSIGHT_CLOUD_URL})?`,
-    initialValue: true,
-  });
-  assertNotCancelled(useCurrentUrl);
-
-  let apiUrl: string | undefined;
-  if (!useCurrentUrl) {
-    const custom = await p.text({
-      message: "Hindsight Cloud URL",
-      placeholder: HINDSIGHT_CLOUD_URL,
-      validate: validateRequired("URL is required"),
-    });
-    assertNotCancelled(custom);
-    apiUrl = custom;
-  } else if (existingUrl) {
-    apiUrl = existingUrl;
-  }
-
-  const token = await promptInlineSecretWithReuse(
-    "Hindsight Cloud API token (paste the value, it will be masked)",
-    pluginConfig.hindsightApiToken
-  );
-
-  const input = { apiUrl, token };
-  applyCloudMode(pluginConfig, input);
-  return summarizeCloud(input);
-}
-
 async function promptApi(pluginConfig: Record<string, unknown>): Promise<string> {
   const existingUrl =
     typeof pluginConfig.hindsightApiUrl === "string"
@@ -354,7 +284,8 @@ async function promptApi(pluginConfig: Record<string, unknown>): Promise<string>
     message: "Hindsight API URL",
     placeholder: "https://mcp.hindsight.example.com",
     initialValue: existingUrl || undefined,
-    validate: validateRequired("URL is required"),
+    validate: (value) =>
+      isVendorHosted(value) ? VENDOR_HOSTED_REFUSED : validateRequired("URL is required")(value),
   });
   assertNotCancelled(apiUrl);
 
@@ -445,8 +376,8 @@ async function runInteractive(
 
   const mode = await p.select({
     message: "How do you want to run Hindsight?",
+    initialValue: "api",
     options: [
-      { value: "cloud", label: "Cloud", hint: "managed Hindsight, no local setup" },
       { value: "api", label: "External API", hint: "your own running Hindsight deployment" },
       {
         value: "embedded",
@@ -458,9 +389,7 @@ async function runInteractive(
   assertNotCancelled(mode);
 
   let summary: string;
-  if ((mode as SetupMode) === "cloud") {
-    summary = await promptCloud(pluginConfig);
-  } else if ((mode as SetupMode) === "api") {
+  if ((mode as SetupMode) === "api") {
     summary = await promptApi(pluginConfig);
   } else {
     summary = await promptEmbedded(pluginConfig);
@@ -482,7 +411,7 @@ async function runInteractive(
       "Secrets were stored inline in openclaw.json. To reference an env var",
       "instead (recommended for CI/production), use:",
       "  openclaw config set plugins.entries.hindsight-openclaw.config.hindsightApiToken \\",
-      "      --ref-source env --ref-id HINDSIGHT_CLOUD_TOKEN",
+      "      --ref-source env --ref-id HINDSIGHT_API_TOKEN",
     ].join("\n"),
     "Hindsight Memory configured"
   );

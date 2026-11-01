@@ -1,5 +1,5 @@
 """Hindsight memory plugin — MemoryProvider with knowledge graph, entity resolution
-and multi-strategy retrieval; cloud (API key), local_external, or local_embedded.
+and multi-strategy retrieval; local_external (a server you run) or local_embedded.
 
 Config: $HERMES_HOME/hindsight/config.json (profile-scoped), else ~/.hindsight/
 config.json (legacy, shared), else env: HINDSIGHT_API_KEY / BANK_ID / BUDGET /
@@ -52,9 +52,8 @@ from .embedded import (
     _stop_daemon,
 )
 from .settings import (
-    _DEFAULT_API_URL,
     _DEFAULT_IDLE_TIMEOUT,
-    _DEFAULT_LOCAL_URL,
+    _is_vendor_hosted,
     _DEFAULT_OBSERVATION_SCOPES,
     _DEFAULT_RETAIN_SOURCE,
     _DEFAULT_RETAIN_STRATEGY,
@@ -81,6 +80,7 @@ from .settings import (
 logger = logging.getLogger(__name__)
 
 _LOCAL_MODES = {"local", "local_embedded"}
+_DEFAULT_MODE = "local_external"
 # Share of the operation timeout an extra recall bank may use, so a slow extra bank
 # always gives up before the operation that also carries the primary's result does.
 _EXTRA_BANK_TIMEOUT_SHARE = 0.8
@@ -137,8 +137,18 @@ def _scoped_flag(name: str, default: bool) -> bool:
     return default if not value else value in {"true", "1", "yes", "on"}
 
 
-def _cloud_api_key(config: dict) -> str:
+def _configured_api_key(config: dict) -> str:
     return config.get("apiKey") or config.get("api_key") or get_secret("HINDSIGHT_API_KEY", "")
+
+
+def _configured_api_url(config: dict) -> str:
+    """The server this config names, or "". There is no default host, and the vendor's hosted
+    service is refused: no usable URL, no provider."""
+    url = config.get("api_url") or config.get("apiUrl") or get_secret("HINDSIGHT_API_URL", "") or ""
+    if _is_vendor_hosted(url):
+        logger.warning("Hindsight refuses %s: this build talks only to servers you run", url)
+        return ""
+    return url
 
 
 def _warn_if_client_outdated() -> None:
@@ -421,7 +431,7 @@ def _load_config() -> dict:
     # the key beside them: read through the secret scope so a multiplexed secondary never inherits
     # the default profile's bank/mode. Tuning knobs (timeouts, budget) stay process-global.
     return {
-        "mode": get_secret("HINDSIGHT_MODE", "") or "cloud",
+        "mode": get_secret("HINDSIGHT_MODE", "") or _DEFAULT_MODE,
         "apiKey": get_secret("HINDSIGHT_API_KEY", ""),
         "timeout": _parse_int_setting(os.environ.get("HINDSIGHT_TIMEOUT"), _DEFAULT_TIMEOUT),
         "idle_timeout": _parse_int_setting(os.environ.get("HINDSIGHT_IDLE_TIMEOUT"), _DEFAULT_IDLE_TIMEOUT),
@@ -521,7 +531,7 @@ class HindsightMemoryProvider(MemoryProvider):
         self._config = self._api_key = self._client = None
         self._embedded_url = None
         self._client_lock = threading.Lock()
-        self._api_url, self._mode = _DEFAULT_API_URL, "cloud"
+        self._api_url, self._mode = "", _DEFAULT_MODE
         self._timeout, self._idle_timeout = _DEFAULT_TIMEOUT, _DEFAULT_IDLE_TIMEOUT
         self._bank_id, self._budget, self._bank_id_template = "hermes", "mid", ""
         self._bank_mission, self._bank_retain_mission = "", None
@@ -594,29 +604,34 @@ class HindsightMemoryProvider(MemoryProvider):
     def is_available(self) -> bool:
         try:
             cfg = _load_config()
-            mode = cfg.get("mode", "cloud")
+            mode = cfg.get("mode", _DEFAULT_MODE)
             if mode in _LOCAL_MODES:
                 # The availability gate is the only place worth self-healing from: agent_init drops
                 # the provider outright when this returns False, and every other runtime probe below
                 # runs after it has already passed.
                 return _check_local_runtime().available
-            return mode == "local_external" or bool(
-                _cloud_api_key(cfg) or cfg.get("api_url") or get_secret("HINDSIGHT_API_URL", "")
-            )
+            return mode == "local_external" and bool(_configured_api_url(cfg))
         except Exception:
             logger.debug("Hindsight availability check failed", exc_info=True)
             return False
 
     def unavailable_reason(self) -> str:
-        """Install hint for an unavailable local_embedded runtime (is_available() gates
-        initialize() out, so the hint it would log never fires; agent_init shows this).
+        """Why the provider is unavailable: a missing URL or retired mode, or the install hint for
+        a local_embedded runtime (is_available() gates initialize() out, so the hint it would log
+        never fires; agent_init shows this).
 
         ``is_available()`` returns False for local modes when the embedded runtime can't be imported, so
         ``initialize()`` — and the hint it would log — is never reached (#7718). Surface the install
         guidance here, where agent_init warns about an unavailable provider.
         """
         try:
-            if _load_config().get("mode", "cloud") not in _LOCAL_MODES:
+            cfg = _load_config()
+            mode = cfg.get("mode", _DEFAULT_MODE)
+            if mode not in _LOCAL_MODES:
+                if mode != "local_external":
+                    return f"Hindsight mode {mode!r} is not supported. Use local_external or local_embedded."
+                if not _configured_api_url(cfg):
+                    return "Hindsight has no usable server URL. Set api_url or HINDSIGHT_API_URL to a server you run."
                 return ""
         except Exception:
             return ""
@@ -641,29 +656,14 @@ class HindsightMemoryProvider(MemoryProvider):
             {
                 "key": "mode",
                 "description": "Connection mode",
-                "default": "cloud",
-                "choices": ["cloud", "local_embedded", "local_external"],
-            },
-            # Cloud mode
-            {
-                "key": "api_url",
-                "description": "Hindsight Cloud API URL",
-                "default": _DEFAULT_API_URL,
-                "when": {"mode": "cloud"},
-            },
-            {
-                "key": "api_key",
-                "description": "Hindsight Cloud API key",
-                "secret": True,
-                "env_var": "HINDSIGHT_API_KEY",
-                "url": "https://ui.hindsight.vectorize.io",
-                "when": {"mode": "cloud"},
+                "default": _DEFAULT_MODE,
+                "choices": ["local_external", "local_embedded"],
             },
             # Local external mode
             {
                 "key": "api_url",
-                "description": "Hindsight API URL",
-                "default": _DEFAULT_LOCAL_URL,
+                "description": "Hindsight API URL (required)",
+                "default": "",
                 "when": {"mode": "local_external"},
             },
             {
@@ -923,7 +923,7 @@ class HindsightMemoryProvider(MemoryProvider):
         api_key = _load_simple_env(_embedded_profile_env_path(cfg)).get("HINDSIGHT_API_TENANT_API_KEY") or self._api_key
         return Hindsight(base_url=self._embedded_url, api_key=api_key or None)
 
-    def _new_cloud_client(self):
+    def _new_api_client(self):
         from hindsight_client import Hindsight
 
         kwargs = {
@@ -934,7 +934,7 @@ class HindsightMemoryProvider(MemoryProvider):
         if self._api_key:
             kwargs["api_key"] = self._api_key
         logger.debug(
-            "Creating Hindsight cloud client (url=%s, has_key=%s, timeout=%s)",
+            "Creating Hindsight API client (url=%s, has_key=%s, timeout=%s)",
             self._api_url,
             bool(self._api_key),
             kwargs["timeout"],
@@ -981,9 +981,12 @@ class HindsightMemoryProvider(MemoryProvider):
         the guarded section never awaits.
         """
         with self._client_lock:
+            if self._mode == "disabled":
+                # Reachable only by a host that keeps a provider is_available() refused.
+                raise RuntimeError("Hindsight is disabled: no usable server")
             if self._client is None:
                 self._client = (
-                    self._new_embedded_client() if self._mode == "local_embedded" else self._new_cloud_client()
+                    self._new_embedded_client() if self._mode == "local_embedded" else self._new_api_client()
                 )
             return self._client
 
@@ -1292,7 +1295,7 @@ class HindsightMemoryProvider(MemoryProvider):
             setattr(self, f"_{name}", str(kwargs.get(name) or "").strip())
         self._turn_index = self._last_retained_turn_count = 0
         self._session_turns = []
-        self._mode = cfg.get("mode", "cloud")
+        self._mode = cfg.get("mode", _DEFAULT_MODE)
         self._timeout = self._int_setting("timeout", "HINDSIGHT_TIMEOUT", _DEFAULT_TIMEOUT)
         self._idle_timeout = self._int_setting("idle_timeout", "HINDSIGHT_IDLE_TIMEOUT", _DEFAULT_IDLE_TIMEOUT)
         if self._mode == "local":  # legacy alias
@@ -1309,6 +1312,11 @@ class HindsightMemoryProvider(MemoryProvider):
                 )
                 self._mode = "disabled"
                 return
+        elif self._mode != "local_external" or not _configured_api_url(cfg):
+            # is_available() normally stops this first; nothing may build a client without a server.
+            logger.warning("Hindsight disabled: %s", self.unavailable_reason() or "no usable server")
+            self._mode = "disabled"
+            return
         self._apply_connection_settings(cfg)
         self._apply_retain_settings(cfg)
         self._apply_recall_settings(cfg)
@@ -1443,9 +1451,8 @@ class HindsightMemoryProvider(MemoryProvider):
 
     def _apply_connection_settings(self, cfg: dict) -> None:
         """Endpoint, bank and mode selectors from *cfg* (env fallbacks where documented)."""
-        self._api_key = _cloud_api_key(cfg)
-        default_url = _DEFAULT_LOCAL_URL if self._mode in {"local_embedded", "local_external"} else _DEFAULT_API_URL
-        self._api_url = cfg.get("api_url") or get_secret("HINDSIGHT_API_URL", "") or default_url
+        self._api_key = _configured_api_key(cfg)
+        self._api_url = _configured_api_url(cfg)
 
         banks = cfg_get(cfg, "banks", "hermes", default={})
         self._bank_id_template = cfg.get("bank_id_template", "") or ""
@@ -1578,7 +1585,7 @@ class HindsightMemoryProvider(MemoryProvider):
                 "Hindsight local_embedded mode cannot run as root "
                 "(PostgreSQL initdb refuses root). Skipping the embedded "
                 "memory daemon. Run Hermes as a non-root user, or switch "
-                "to cloud / local_external mode via 'hermes memory setup'."
+                "to local_external mode via 'hermes memory setup'."
             )
             logger.warning(msg)
             # Surface to the terminal too — a daemon that never starts would otherwise fail silently and

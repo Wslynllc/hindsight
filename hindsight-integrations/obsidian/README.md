@@ -34,11 +34,9 @@ Your own frontmatter `tags`/`aliases` are carried through too.
 
 ## Installation
 
-> ✨ **Recommended:** [Hindsight Cloud](https://ui.hindsight.vectorize.io) — sign up free, get an API key, and skip self-hosting.
-
 While in beta, install via [BRAT](https://github.com/TfTHacker/obsidian42-brat): add the repo [`vectorize-io/hindsight-obsidian`](https://github.com/vectorize-io/hindsight-obsidian) — the dedicated plugin repo BRAT installs from (see [Distribution](#distribution--maintainers)) — then enable it under **Settings → Community plugins**.
 
-**Self-hosting alternative:**
+**Self-hosting:**
 
 ```bash
 pip install hindsight-all
@@ -52,8 +50,8 @@ Open **Settings → Hindsight**:
 
 | Setting                   | Default                              | Description                                                                                    |
 | ------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| API URL                   | `https://api.hindsight.vectorize.io` | Hindsight server (use `http://localhost:8888` for self-hosted)                                 |
-| API key                   | —                                    | Hindsight Cloud API key                                                                        |
+| API URL                   | —                                    | Your Hindsight server, e.g. `http://localhost:8888`. Nothing syncs until it is set                         |
+| API key                   | —                                    | Only if your server needs one                                                                  |
 | Bank name                 | `obsidian`                           | Shared bank for all your vaults (separated by `vault:` tags)                                   |
 | Include / exclude folders | —                                    | Limit which notes sync                                                                         |
 | Sync on edit              | on                                   | Re-ingest notes automatically as you edit                                                      |
@@ -79,7 +77,7 @@ npm install -g @vectorize-io/hindsight-obsidian
 # one-shot reconcile (cron-friendly)
 hindsight-obsidian-sync reconcile \
   --vault ~/Vaults/Brain --bank my-vault \
-  --api-url https://api.hindsight.vectorize.io --api-token hsk_...
+  --api-url http://localhost:8888
 
 # or keep it running and sync changes live
 hindsight-obsidian-sync reconcile --vault ~/Vaults/Brain --bank my-vault --watch

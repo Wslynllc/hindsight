@@ -622,15 +622,6 @@
     "memoryDefenseAction_block": "차단",
     "memoryDefenseSecretLeakTitle": "시크릿 유출 방지",
     "memoryDefenseSecretLeakDescription": "보존된 콘텐츠에서 시크릿을 검사합니다. 일반적인 공급자 키, AWS, 개인 정보를 포함하는 45개 패턴.",
-    "memoryDefenseEnterpriseTitle": "Memory Defense Enterprise",
-    "memoryDefenseEnterpriseSubtitle": "더 많이 감지하고, 더 똑똑하게 편집하며, 모든 것을 감사하세요 — Hindsight Cloud에서 사용 가능.",
-    "memoryDefenseEnterpriseFeatureDetectSecrets": "고급 시크릿 감지: 공급자 키, AWS, GitHub, CI 토큰을 포함하는 200개 이상의 패턴",
-    "memoryDefenseEnterpriseFeatureBase64": "Base64 디코딩: 인코딩된 페이로드 안에 숨겨진 시크릿 감지",
-    "memoryDefenseEnterpriseFeatureLlm": "LLM 스크리닝: 정규식으로 잡을 수 없는 새로운 유출 패턴 감지",
-    "memoryDefenseEnterpriseFeaturePromptInjection": "프롬프트 인젝션 감지: 에이전트 동작을 덮어쓰려는 시도 차단",
-    "memoryDefenseEnterpriseFeatureSizeAnomaly": "크기 이상: 의심스럽게 큰 페이로드 거부",
-    "memoryDefenseEnterpriseFeatureProtectedKeys": "보호된 태그 네임스페이스: 변경 불가능한 ID 태그 적용",
-    "memoryDefenseEnterpriseCta": "데모 요청",
     "recallTitle": "리콜",
     "recallDescription": "이 뱅크의 리콜 시 실행되는 검색 단계와 결과 중복 제거 방식",
     "recallServerDefault": "서버 기본값",
@@ -1923,7 +1914,7 @@
     "resumeMotionLabel": "재생"
   },
   "metadata": {
-    "title": "Hindsight Cloud",
+    "title": "Hindsight",
     "description": "Hindsight 시맨틱 메모리를 위한 멀티테넌트 컨트롤 플레인"
   },
   "addDocument": {
@@ -1940,8 +1931,6 @@
     "extractionMethodLabel": "추출 방법",
     "parserStandardLabel": "표준",
     "parserStandardDescription": "무료 — 텍스트 기반 문서에 적합; 이미지 OCR은 서버 설정에 따라 달라집니다",
-    "parserEnhancedLabel": "향상 (Iris)",
-    "parserEnhancedDescription": "추가 요금 — 복잡한 레이아웃, 스캔된 문서 및 이미지에 더 높은 품질",
     "contextLabel": "컨텍스트",
     "contextPlaceholder": "이 문서에 대한 선택적 컨텍스트...",
     "eventDateLabel": "이벤트 날짜",
@@ -1959,8 +1948,6 @@
     "toastDocumentAddedDescription": "문서가 추가되었으며 메모리가 추출되고 있습니다.",
     "toastFilesSkipped": "일부 파일이 건너뛰어졌습니다",
     "toastFilesSkippedDescription": "지원되는 파일 형식만 허용됩니다 (PDF, Word, PowerPoint, Excel, 이미지 및 텍스트 파일).",
-    "toastImagesRequireIris": "이미지는 향상 (Iris) 추출이 필요합니다",
-    "toastImagesRequireIrisDescription": "업로드하려면 향상 추출로 전환하세요: {names}",
     "toastUploadingSingle": "{name} 업로드 중...",
     "toastUploadingMultiple": "파일 {count}개 업로드 중...",
     "toastFileUploaded": "파일이 업로드되었습니다",

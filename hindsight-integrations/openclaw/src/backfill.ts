@@ -18,6 +18,7 @@ function loadPackageVersion(): string {
 
 const USER_AGENT = `hindsight-openclaw/${loadPackageVersion()}`;
 import { DEFAULT_RETAIN_CONTEXT, detectExternalApi, detectLLMConfig } from "./index.js";
+import { isVendorHosted, VENDOR_HOSTED_REFUSED } from "./vendor-host.js";
 import type { BankStats, PluginConfig } from "./types.js";
 import {
   buildBackfillPlan,
@@ -193,6 +194,7 @@ function inferApiSettings(
     explicitApiUrl ||
     pluginConfig.hindsightApiUrl ||
     `http://127.0.0.1:${pluginConfig.apiPort || 9077}`;
+  if (isVendorHosted(apiUrl)) throw new Error(VENDOR_HOSTED_REFUSED);
   const apiToken = explicitApiToken || pluginConfig.hindsightApiToken;
   return { apiUrl, apiToken: apiToken || undefined };
 }

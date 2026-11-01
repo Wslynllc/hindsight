@@ -13,8 +13,6 @@
  * Zero-dependency by design: the installer must run from a bare `npm install -g` with nothing
  * but node builtins, so no chalk/@clack/prompts.
  */
-import { execFileSync } from "node:child_process";
-import { readSync } from "node:fs";
 import { brandWord } from "./core/brand";
 
 export interface InstallerUiOptions {
@@ -38,83 +36,8 @@ export interface InstallerUi {
   intro(): void;
   /** Style an interactive question so readline prompts sit on the rail like log lines. */
   prompt(question: string): string;
-  /** Arrow-key picker: chosen index, null when cancelled (Esc/q/Ctrl+C), undefined when a raw
-   *  TTY isn't available — the caller then falls back to its plain numeric prompt. */
-  select(
-    question: string,
-    options: SelectOption[],
-    defaultIndex: number
-  ): number | null | undefined;
   log(message: string): void;
   outro(exitCode: number): void;
-}
-
-export interface SelectOption {
-  label: string;
-  hint?: string;
-}
-
-export interface SelectKeyResult {
-  kind: "move" | "submit" | "cancel" | "none";
-  index: number;
-}
-
-/**
- * Fit one option row into the terminal width. The redraw moves the cursor up N LOGICAL rows —
- * a row that wraps occupies two physical rows, the cursor lands mid-list, and every keypress
- * repaints over the wrong lines (content visibly duplicates). So a row must never wrap: the
- * hint gives way first, then the label. Pure so the edge cases are unit-testable.
- */
-export function fitSelectRow(
-  label: string,
-  hint: string | undefined,
-  width: number
-): { label: string; hint: string } {
-  const room = Math.max(10, width - 6); // "│  ❯ " prefix + one spare column
-  let hintText = hint ? ` — ${hint}` : "";
-  if (label.length > room) return { label: `${label.slice(0, room - 1)}…`, hint: "" };
-  if (label.length + hintText.length > room) {
-    hintText = `${hintText.slice(0, room - label.length - 1)}…`;
-  }
-  return { label, hint: hintText };
-}
-
-/**
- * Split one stdin read into individual keys. Fast typing, key repeat, or a paste delivers several
- * keys in a single read — treating the whole chunk as one token made those inputs match nothing
- * and the picker sat there ignoring them. CSI sequences (ESC [ … final byte) stay whole; every
- * other byte is its own key.
- */
-export function splitKeys(chunk: string): string[] {
-  const keys: string[] = [];
-  for (let i = 0; i < chunk.length; ) {
-    if (chunk[i] === "\x1b" && chunk[i + 1] === "[") {
-      let j = i + 2;
-      while (j < chunk.length && !(chunk[j] >= "@" && chunk[j] <= "~")) j++;
-      keys.push(chunk.slice(i, Math.min(j + 1, chunk.length)));
-      i = j + 1;
-    } else {
-      keys.push(chunk[i]);
-      i += 1;
-    }
-  }
-  return keys;
-}
-
-/**
- * Pure keypress reducer for select() — the interactive shell around it (raw mode, redraw) is
- * deliberately thin so THIS is what carries the behavior and the unit tests. Digits still submit
- * directly, so the muscle memory from the old numbered menu keeps working.
- */
-export function selectKeyAction(key: string, index: number, count: number): SelectKeyResult {
-  if (key === "\x1b[A" || key === "k") return { kind: "move", index: (index + count - 1) % count };
-  if (key === "\x1b[B" || key === "j") return { kind: "move", index: (index + 1) % count };
-  if (key === "\r" || key === "\n") return { kind: "submit", index };
-  // Ctrl+C, a lone Esc, or q cancel; arrow sequences arrive atomically and match above first.
-  if (key === "\x03" || key === "\x1b" || key === "q") return { kind: "cancel", index };
-  const digit = Number.parseInt(key, 10);
-  if (digit >= 1 && digit <= count) return { kind: "submit", index: digit - 1 };
-  return { kind: "none", index };
 }
 
 /**
@@ -204,73 +127,6 @@ export function createInstallerUi(o: InstallerUiOptions): InstallerUi {
     /** Style an interactive question so readline prompts sit on the rail like log lines. */
     prompt(question: string): string {
       return `${bar}  ${question}`;
-    },
-
-    select(question: string, options: SelectOption[], defaultIndex: number) {
-      // Raw mode comes from stty, NOT process.stdin.setRawMode: touching process.stdin flips
-      // fd 0 non-blocking and starts the very EAGAIN dance readLineSync had to be cured of.
-      // No stty (Windows, exotic shells) → undefined, and the caller falls back to numbers.
-      const stty = (args: string[]): string =>
-        execFileSync("stty", args, { stdio: ["inherit", "pipe", "pipe"], encoding: "utf8" }).trim();
-      let savedTty: string;
-      try {
-        savedTty = stty(["-g"]);
-        stty(["raw", "-echo"]);
-      } catch {
-        return undefined;
-      }
-      // Raw mode disables newline translation, so every rendered line ends in \r\n explicitly.
-      const render = (index: number, redraw: boolean): void => {
-        const width = process.stdout.columns || 80;
-        const rows = options.map((opt, i) => {
-          const on = i === index;
-          const pointer = on ? cyan("❯") : " ";
-          const fitted = fitSelectRow(opt.label, opt.hint, width);
-          const label = on ? bold(fitted.label) : fitted.label;
-          return `\x1b[2K${bar}  ${pointer} ${label}${fitted.hint ? dim(fitted.hint) : ""}`;
-        });
-        if (redraw) process.stdout.write(`\x1b[${options.length}A`); // back to the first option row
-        process.stdout.write(rows.map((r) => `\r${r}\r\n`).join(""));
-      };
-      lastLine = "select"; // whatever follows on the rail must re-emit its own spacer
-      // Belt and braces for the cursor-up math: \x1b[?7l turns terminal autowrap off for the
-      // picker's lifetime (restored in finally), so even a mis-measured row clips instead of
-      // wrapping and the repaint always covers the right lines.
-      process.stdout.write("\x1b[?7l");
-      process.stdout.write(`${bar}  ${symbol.info} ${dim(question)} ${dim("(↑/↓, Enter)")}\r\n`);
-      let index = Math.min(Math.max(defaultIndex, 0), options.length - 1);
-      render(index, false);
-      const buf = Buffer.alloc(16);
-      try {
-        for (;;) {
-          let n: number;
-          try {
-            n = readSync(0, buf, 0, buf.length, null);
-          } catch (e) {
-            if ((e as NodeJS.ErrnoException).code !== "EAGAIN") return null; // stdin gone → cancel
-            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
-            continue;
-          }
-          if (n === 0) return null; // EOF → cancel
-          // One read can hold several keys (key repeat, paste) — apply them all in order.
-          for (const key of splitKeys(buf.subarray(0, n).toString("latin1"))) {
-            const action = selectKeyAction(key, index, options.length);
-            index = action.index;
-            if (action.kind === "move") render(index, true);
-            else if (action.kind === "submit") {
-              render(index, true); // repaint so a digit shortcut also shows its row selected
-              return index;
-            } else if (action.kind === "cancel") return null;
-          }
-        }
-      } finally {
-        process.stdout.write("\x1b[?7h"); // re-enable autowrap
-        try {
-          stty([savedTty!]);
-        } catch {
-          // the terminal stays raw only if restoring fails AND the process lives on — accept it
-        }
-      }
     },
 
     log(message: string): void {

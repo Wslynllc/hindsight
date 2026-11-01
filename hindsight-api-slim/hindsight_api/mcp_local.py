@@ -17,9 +17,9 @@ Or with uvx:
     uvx hindsight-api@latest hindsight-local-mcp
 
 Environment variables:
-    HINDSIGHT_API_LLM_API_KEY: Required. API key for LLM provider.
-    HINDSIGHT_API_LLM_PROVIDER: Optional. LLM provider (default: "openai").
-    HINDSIGHT_API_LLM_MODEL: Optional. LLM model (default: "gpt-4o-mini").
+    HINDSIGHT_API_LLM_PROVIDER: Optional. LLM provider (default: "none").
+    HINDSIGHT_API_LLM_BASE_URL: The local server, for a provider that needs one.
+    HINDSIGHT_API_LLM_MODEL: Optional. LLM model.
     HINDSIGHT_API_DATABASE_URL: Optional. Override database URL (default: pg0://hindsight-mcp).
 """
 

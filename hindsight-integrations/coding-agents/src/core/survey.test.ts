@@ -450,7 +450,12 @@ describe("startCodebaseSurvey", () => {
     const config = join(lockDir, "config.json");
     writeFileSync(
       config,
-      JSON.stringify({ bankId: "bank-1", apiUrl: "https://api.example.test", apiToken: "t" })
+      JSON.stringify({
+        bankId: "bank-1",
+        apiUrl: "https://api.example.test",
+        apiToken: "t",
+        optInOnly: false,
+      })
     );
     // The stand-in agent records its pid and its supervisor's, then idles like a long survey.
     const agent = `const fs = require('node:fs'); if (process.env.${SURVEY_SPEC_ENV}) fs.writeFileSync(${JSON.stringify(lockDir)} + '/leaked-spec', ''); fs.writeFileSync(${JSON.stringify(lockDir)} + '/pid-' + process.pid + '-' + process.ppid, ''); setInterval(() => {}, 1000);`;

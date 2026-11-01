@@ -622,15 +622,6 @@
     "memoryDefenseAction_block": "Bloquer",
     "memoryDefenseSecretLeakTitle": "Prévention des fuites de secrets",
     "memoryDefenseSecretLeakDescription": "Analyse le contenu retenu à la recherche de secrets. 45 motifs couvrant les clés de fournisseurs courants, AWS et les informations personnelles.",
-    "memoryDefenseEnterpriseTitle": "Memory Defense Enterprise",
-    "memoryDefenseEnterpriseSubtitle": "Détectez davantage, expurgez plus intelligemment et auditez tout — disponible dans Hindsight Cloud.",
-    "memoryDefenseEnterpriseFeatureDetectSecrets": "Détection avancée de secrets : plus de 200 motifs couvrant les clés de fournisseurs, AWS, GitHub et tokens CI",
-    "memoryDefenseEnterpriseFeatureBase64": "Décodage Base64 : détecte les secrets cachés dans les charges encodées",
-    "memoryDefenseEnterpriseFeatureLlm": "Analyse par LLM : détecte les nouveaux motifs d'exfiltration que les regex ne peuvent pas",
-    "memoryDefenseEnterpriseFeaturePromptInjection": "Détection d'injection de prompt : bloque les tentatives de modifier le comportement de l'agent",
-    "memoryDefenseEnterpriseFeatureSizeAnomaly": "Anomalie de taille : rejette les charges utiles anormalement volumineuses",
-    "memoryDefenseEnterpriseFeatureProtectedKeys": "Espaces de noms de tags protégés : applique des tags d'identité immuables",
-    "memoryDefenseEnterpriseCta": "Demander une démo",
     "recallTitle": "Rappel",
     "recallDescription": "Les étapes de récupération exécutées lors du rappel pour cette banque, et la déduplication des résultats",
     "recallServerDefault": "Valeur par défaut du serveur",
@@ -1923,7 +1914,7 @@
     "resumeMotionLabel": "Reprendre"
   },
   "metadata": {
-    "title": "Hindsight Cloud",
+    "title": "Hindsight",
     "description": "Plan de contrôle multi-locataire pour la mémoire sémantique Hindsight"
   },
   "addDocument": {
@@ -1940,8 +1931,6 @@
     "extractionMethodLabel": "Méthode d'extraction",
     "parserStandardLabel": "Standard",
     "parserStandardDescription": "Gratuit — adapté aux documents textuels ; l’OCR des images dépend de la configuration du serveur",
-    "parserEnhancedLabel": "Amélioré (Iris)",
-    "parserEnhancedDescription": "Frais supplémentaires — meilleure qualité pour les mises en page complexes, les documents numérisés et les images",
     "contextLabel": "Contexte",
     "contextPlaceholder": "Contexte facultatif sur ce document...",
     "eventDateLabel": "Date de l'événement",
@@ -1959,8 +1948,6 @@
     "toastDocumentAddedDescription": "Le document a été ajouté et les souvenirs sont en cours d'extraction.",
     "toastFilesSkipped": "Certains fichiers ont été ignorés",
     "toastFilesSkippedDescription": "Seuls les types de fichiers pris en charge sont autorisés (PDF, Word, PowerPoint, Excel, images et fichiers texte).",
-    "toastImagesRequireIris": "Les images nécessitent l'extraction Améliorée (Iris)",
-    "toastImagesRequireIrisDescription": "Passez à l'extraction Améliorée pour téléverser : {names}",
     "toastUploadingSingle": "Téléversement de {name}...",
     "toastUploadingMultiple": "Téléversement de {count} fichiers...",
     "toastFileUploaded": "Fichier téléversé",

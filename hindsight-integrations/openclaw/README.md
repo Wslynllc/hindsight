@@ -4,21 +4,27 @@ Biomimetic long-term memory for [OpenClaw](https://openclaw.ai) using [Hindsight
 
 ## Quick Start
 
+This fork installs from its own checkout. There is no hosted server and no default URL: with neither
+`hindsightApiUrl` nor `llmProvider` set, the plugin reports a configuration error and starts nothing.
+A `hindsightApiUrl` on any `vectorize.io` host is refused the same way, even with `llmProvider` set.
+
 ```bash
-# 1. Install the plugin
-openclaw plugins install @vectorize-io/hindsight-openclaw
+# 1. Build and pack the plugin from hindsight-integrations/openclaw
+npm ci && npm run build && npm pack
 
-# 2. Run the interactive setup wizard
-npx --package @vectorize-io/hindsight-openclaw hindsight-openclaw-setup
+# 2. Install the packed plugin
+openclaw plugins install ./vectorize-io-hindsight-openclaw-*.tgz
 
-# 3. Start OpenClaw
+# 3. Point it at your server (or run `node dist/setup.js` for the interactive wizard)
+node dist/setup.js --mode api --api-url http://<server>:8888 --no-token
+
+# 4. Start OpenClaw
 openclaw gateway
 ```
 
-`hindsight-openclaw-setup` walks you through picking one of three modes:
+`hindsight-openclaw-setup` walks you through picking one of two modes:
 
-- **Cloud** — managed Hindsight. Paste your cloud API token, done.
-- **External API** — your own running Hindsight deployment. Prompts for the URL and optional token.
+- **External API** (the default) — your own running Hindsight deployment. Prompts for the URL and optional token.
 - **Embedded daemon** — spawns a local `hindsight-embed` daemon on this machine. Prompts for the LLM provider (OpenAI / Anthropic / Gemini / Groq / Claude Code / Codex / Ollama) and its API key.
 
 The interactive wizard stores credentials **inline** in `openclaw.json` for simplicity — the value is masked as you paste it. For CI / production you can store credentials as a `SecretRef` (resolved from an env var, file, or exec source at startup) by using the non-interactive flags with `--token-env` / `--api-key-env`, or by switching an existing field afterwards with `openclaw config set ... --ref-source env --ref-id …`.
@@ -334,7 +340,7 @@ By default it mirrors the active plugin settings for:
 Dry-run example:
 
 ```bash
-npx --package @vectorize-io/hindsight-openclaw hindsight-openclaw-backfill \
+node dist/backfill.js \
   --openclaw-root ~/.openclaw \
   --dry-run
 ```

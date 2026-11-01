@@ -254,17 +254,6 @@ main() {
   # -------------------------------------------------------------------------
   # Phase 2 — non-interactive setup for each mode
   # -------------------------------------------------------------------------
-  run_setup_mode "cloud (default URL, SecretRef)" \
-    --mode cloud --token-env HINDSIGHT_CLOUD_TOKEN
-  [[ "$(get_config_value plugins.entries.hindsight-openclaw.config.hindsightApiUrl)" == "https://api.hindsight.vectorize.io" ]] \
-    || fail "cloud mode: hindsightApiUrl not set to the default URL"
-
-  run_setup_mode "cloud (inline --token)" \
-    --mode cloud --token hsk_smoke_test_inline_value
-  # Read the raw file — `openclaw config get` redacts sensitive fields.
-  [[ "$(get_raw_config_value plugins.entries.hindsight-openclaw.config.hindsightApiToken)" == "hsk_smoke_test_inline_value" ]] \
-    || fail "cloud mode: --token did not roundtrip as inline string"
-
   run_setup_mode "external API (no auth)" \
     --mode api --api-url "$HINDSIGHT_API_URL" --no-token
   [[ "$(get_config_value plugins.entries.hindsight-openclaw.config.hindsightApiUrl)" == "$HINDSIGHT_API_URL" ]] \
@@ -294,11 +283,8 @@ main() {
   # Phase 3 — negative tests: bad CLI args must fail fast
   # -------------------------------------------------------------------------
   log "verifying setup wizard rejects bad args…"
-  if node "$EXT_DIR/dist/setup.js" --config-path "$CONFIG_PATH" --mode cloud 2>/dev/null; then
-    fail "cloud mode without --token or --token-env should have failed"
-  fi
-  if node "$EXT_DIR/dist/setup.js" --config-path "$CONFIG_PATH" --mode cloud --token hsk_x --token-env T 2>/dev/null; then
-    fail "cloud mode with both --token and --token-env should have failed"
+  if node "$EXT_DIR/dist/setup.js" --config-path "$CONFIG_PATH" --mode cloud --token hsk_x 2>/dev/null; then
+    fail "--mode cloud should have been rejected"
   fi
   if node "$EXT_DIR/dist/setup.js" --config-path "$CONFIG_PATH" --mode api --api-url "$HINDSIGHT_API_URL" --token-env TOK --no-token 2>/dev/null; then
     fail "--token-env + --no-token together should have failed"

@@ -26,7 +26,7 @@ export interface HindsightSettings {
 }
 
 export const DEFAULT_SETTINGS: HindsightSettings = {
-  apiUrl: "https://api.hindsight.vectorize.io",
+  apiUrl: "",
   apiKey: "",
   bankId: "",
   includeFolders: [],
@@ -66,10 +66,10 @@ export class HindsightSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("API URL")
-      .setDesc("Hindsight Cloud default; use http://localhost:8888 for self-hosted.")
+      .setDesc("URL of your Hindsight server. Nothing syncs until this is set.")
       .addText((t) =>
         t
-          .setPlaceholder("https://api.hindsight.vectorize.io")
+          .setPlaceholder("http://localhost:8888")
           .setValue(this.plugin.settings.apiUrl)
           .onChange(async (v) => {
             this.plugin.settings.apiUrl = v.trim();
@@ -79,7 +79,7 @@ export class HindsightSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("API key")
-      .setDesc("Hindsight Cloud API key. Stored in this vault's plugin config.")
+      .setDesc("Only if your server requires one. Stored in this vault's plugin config.")
       .addText((t) => {
         t.setValue(this.plugin.settings.apiKey).onChange(async (v) => {
           this.plugin.settings.apiKey = v.trim();

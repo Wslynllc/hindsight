@@ -18,7 +18,7 @@
 #   docker build -t hindsight .                                          # Both (standalone)
 #   docker build -t hindsight-api --target api-only .                    # API only
 #   docker build -t hindsight-cp --target cp-only .                      # Control Plane only
-#   docker build -t hindsight --build-arg PRELOAD_ML_MODELS=false .      # Skip ML model preload
+#   docker build -t hindsight --build-arg PRELOAD_ML_MODELS=false .      # Skip preload; mount a model cache, the image runs offline
 #   docker build -t hindsight --build-arg INCLUDE_LOCAL_MODELS=false .   # Skip local ML deps (for external providers)
 
 ARG PRELOAD_ML_MODELS=true
@@ -143,6 +143,10 @@ WORKDIR /app/memory-poc/hindsight-control-plane
 # Usage: docker build --build-arg NEXT_PUBLIC_BASE_PATH=/hindsight ...
 ARG NEXT_PUBLIC_BASE_PATH=""
 
+# `next build` reports to Vercel unless told not to.
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV DO_NOT_TRACK=1
+
 # Build Control Plane - run next build first, then custom standalone copy
 # (The build:standalone script expects a specific path structure that differs in Docker)
 RUN npm exec -- next build
@@ -221,6 +225,10 @@ ENV PATH="/app/api/.venv/bin:${PATH}"
 # Includes retry logic with exponential backoff for transient network failures
 ARG PRELOAD_ML_MODELS
 ARG INCLUDE_LOCAL_MODELS
+# No telemetry from anything in this image, at build time or at runtime.
+ENV HF_HUB_DISABLE_TELEMETRY=1
+ENV DO_NOT_TRACK=1
+ENV NEXT_TELEMETRY_DISABLED=1
 ENV HF_HUB_DOWNLOAD_TIMEOUT=600
 RUN if [ "$PRELOAD_ML_MODELS" = "true" ] && [ "$INCLUDE_LOCAL_MODELS" = "true" ]; then \
     MAX_RETRIES=3; \
@@ -260,6 +268,11 @@ ENV PYTHONUNBUFFERED=1
 ENV TRANSFORMERS_VERBOSITY=error
 ENV HF_HUB_VERBOSITY=error
 ENV TOKENIZERS_PARALLELISM=false
+# Models come from the preload above, or from a mounted cache. Set after that RUN so
+# the build can still download them: at runtime even a cached model would otherwise
+# be checked against huggingface.co on every start (local_device.prefetch_local_model).
+ENV HF_HUB_OFFLINE=1
+ENV TRANSFORMERS_OFFLINE=1
 
 CMD ["/app/start-all.sh"]
 
@@ -313,6 +326,8 @@ RUN apk upgrade --no-cache && apk add --no-cache bash \
 EXPOSE 9999
 
 ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV DO_NOT_TRACK=1
 ENV HINDSIGHT_CP_DATAPLANE_API_URL=http://localhost:8888
 ENV HINDSIGHT_ENABLE_API=false
 ENV HINDSIGHT_ENABLE_CP=true
@@ -405,6 +420,10 @@ ENV PATH="/app/api/.venv/bin:${PATH}"
 # Includes retry logic with exponential backoff for transient network failures
 ARG PRELOAD_ML_MODELS
 ARG INCLUDE_LOCAL_MODELS
+# No telemetry from anything in this image, at build time or at runtime.
+ENV HF_HUB_DISABLE_TELEMETRY=1
+ENV DO_NOT_TRACK=1
+ENV NEXT_TELEMETRY_DISABLED=1
 ENV HF_HUB_DOWNLOAD_TIMEOUT=600
 RUN if [ "$PRELOAD_ML_MODELS" = "true" ] && [ "$INCLUDE_LOCAL_MODELS" = "true" ]; then \
     MAX_RETRIES=3; \
@@ -446,6 +465,11 @@ ENV PYTHONUNBUFFERED=1
 ENV TRANSFORMERS_VERBOSITY=error
 ENV HF_HUB_VERBOSITY=error
 ENV TOKENIZERS_PARALLELISM=false
+# Models come from the preload above, or from a mounted cache. Set after that RUN so
+# the build can still download them: at runtime even a cached model would otherwise
+# be checked against huggingface.co on every start (local_device.prefetch_local_model).
+ENV HF_HUB_OFFLINE=1
+ENV TRANSFORMERS_OFFLINE=1
 
 CMD ["/app/start-all.sh"]
 

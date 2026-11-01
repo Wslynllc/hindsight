@@ -63,6 +63,12 @@ from hindsight_api.engine.task_backend import SyncTaskBackend
 from hindsight_api.pg0 import EmbeddedPostgres
 from hindsight_api.tracing import unregister_span_recorder
 
+# Upstream's default, which this suite is written against. This fork ships "none", and that
+# forces chunks-only retain (config.py), which changes what config validation and the retain
+# prompt do. test_local_only.py covers the shipped default. A .env still wins: it is loaded
+# later with override=True.
+os.environ.setdefault("HINDSIGHT_API_LLM_PROVIDER", "openai")
+
 
 async def _teardown_memory_engine(mem: MemoryEngine) -> None:
     """Tear down a test MemoryEngine, guaranteeing its span recorder is unregistered.
@@ -104,6 +110,31 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if inspect.iscoroutinefunction(getattr(item, "obj", None)):
             item.fixturenames.append("_close_aiohttp_sessions")
+
+
+@pytest.fixture(autouse=True)
+def _allow_hosted_providers(request, monkeypatch):
+    """Let upstream's tests build the hosted providers this fork refuses in production.
+
+    Those modules stay in the tree so that upstream merges are cheap, and their tests
+    run against fakes, so nothing here reaches a hosted service. A subprocess keeps the
+    guard, which is what test_local_only.py relies on, along with the ``local_only`` marker.
+    """
+    if request.node.get_closest_marker("local_only"):
+        return
+
+    from hindsight_api import local_only
+
+    for check in (
+        "check_databases",
+        "check_url",
+        "check_llm",
+        "check_embeddings",
+        "check_reranker",
+        "check_file_parser",
+        "check_file_storage",
+    ):
+        monkeypatch.setattr(local_only, check, lambda *args, **kwargs: None)
 
 
 @pytest.fixture(autouse=True)

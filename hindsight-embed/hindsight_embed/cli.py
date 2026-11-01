@@ -12,14 +12,12 @@ Usage:
 
 Environment variables:
     HINDSIGHT_API_LLM_API_KEY: Required when the selected LLM provider uses an API key.
-    HINDSIGHT_API_LLM_PROVIDER: Optional. LLM provider (default: "openai").
+    HINDSIGHT_API_LLM_PROVIDER: Optional. LLM provider (default: "none").
+    HINDSIGHT_API_LLM_BASE_URL: The local server, required for provider "openai".
     HINDSIGHT_API_LLM_MODEL: Optional. LLM model (default: provider-specific, resolved by hindsight-api).
     HINDSIGHT_EMBED_API_URL: Optional. Use external API server instead of starting local daemon.
     HINDSIGHT_EMBED_API_TOKEN: Optional. Authentication token for external API (sent as Bearer token).
     HINDSIGHT_EMBED_API_DATABASE_URL: Optional. Database URL for daemon (default: "pg0://hindsight-embed").
-    HINDSIGHT_EMBED_API_VERSION: Optional. hindsight-api version to use (default: matches embed version).
-                                 Note: Only applies when starting daemon. To change version, stop daemon first.
-    HINDSIGHT_EMBED_CLI_VERSION: Optional. hindsight CLI version to install (default: {embed_version}).
     HINDSIGHT_EMBED_CONTROL_PORT: Optional. Port for the control center web app (default: 7878).
 """
 
@@ -89,6 +87,8 @@ def load_config_file():
 
 ENV_LLM_PROVIDER = "HINDSIGHT_API_LLM_PROVIDER"
 ENV_LLM_API_KEY = "HINDSIGHT_API_LLM_API_KEY"
+# hindsight-api's DEFAULT_LLM_PROVIDER. Repeated, not imported: see get_config().
+DEFAULT_LLM_PROVIDER = "none"
 
 
 def get_config() -> dict[str, str]:
@@ -101,7 +101,7 @@ def get_config() -> dict[str, str]:
     of settings that exist, and it grows every release.
 
     No provider or model default is injected: ``hindsight-api`` resolves both
-    (its ``DEFAULT_LLM_PROVIDER`` is this same ``"openai"``, and
+    (its ``DEFAULT_LLM_PROVIDER`` is this module's, and
     ``PROVIDER_DEFAULT_MODELS`` is provider-keyed). Duplicating those tables
     here would silently desync — and importing them fails in standalone venvs
     (``uvx hindsight-embed``) where ``hindsight-api`` isn't installed anyway.
@@ -111,7 +111,7 @@ def get_config() -> dict[str, str]:
 
     # OPENAI_API_KEY is the one non-HINDSIGHT_ name honoured here, and only for
     # providers that authenticate with an LLM API key at all.
-    provider = config.get(ENV_LLM_PROVIDER) or "openai"
+    provider = config.get(ENV_LLM_PROVIDER) or DEFAULT_LLM_PROVIDER
     openai_key = os.environ.get("OPENAI_API_KEY")
     if openai_key and ENV_LLM_API_KEY not in config and provider not in NO_API_KEY_PROVIDERS:
         config[ENV_LLM_API_KEY] = openai_key
@@ -124,7 +124,11 @@ PROVIDER_API_KEYS = {
     "openai": "OPENAI_API_KEY",
     "groq": "GROQ_API_KEY",
     "gemini": "GEMINI_API_KEY",
+    "none": None,
+    "mock": None,
     "ollama": None,
+    "lmstudio": None,
+    "llamacpp": None,
     "vertexai": None,
     "github-copilot": None,
 }
@@ -193,7 +197,7 @@ def _has_non_interactive_env() -> bool:
 def _do_configure_from_env():
     """Non-interactive configuration from environment variables (for CI)."""
     # Check for required environment variables
-    provider = os.environ.get("HINDSIGHT_API_LLM_PROVIDER", "openai")
+    provider = os.environ.get("HINDSIGHT_API_LLM_PROVIDER", DEFAULT_LLM_PROVIDER)
     api_key = (
         None
         if provider in NO_API_KEY_PROVIDERS
@@ -211,7 +215,7 @@ def _do_configure_from_env():
         print("", file=sys.stderr)
         print("For non-interactive (CI) mode, set environment variables:", file=sys.stderr)
         print("  HINDSIGHT_API_LLM_API_KEY=<your-api-key>", file=sys.stderr)
-        print(f"  HINDSIGHT_API_LLM_PROVIDER={provider}  # optional, default: openai", file=sys.stderr)
+        print(f"  HINDSIGHT_API_LLM_PROVIDER={provider}  # optional, default: {DEFAULT_LLM_PROVIDER}", file=sys.stderr)
         print(
             "  HINDSIGHT_API_LLM_MODEL=<model>  # optional, defaults to provider's recommended model", file=sys.stderr
         )
@@ -368,11 +372,10 @@ def _do_configure_interactive(profile_name: str | None = None, port: int | None 
 
     # Provider selection
     providers = [
-        ("OpenAI (recommended)", "openai"),
-        ("Groq (fast & free tier)", "groq"),
-        ("Google Gemini", "gemini"),
-        ("Ollama (local, no API key)", "ollama"),
-        ("GitHub Copilot (signed-in account, no LLM API key)", "github-copilot"),
+        ("Ollama (on this machine, no API key)", "ollama"),
+        ("LM Studio (on this machine, no API key)", "lmstudio"),
+        ("OpenAI-compatible server on your network", "openai"),
+        ("None (store and search only)", "none"),
     ]
 
     provider = _prompt_choice("Select your LLM provider:", providers, default=1)
@@ -382,6 +385,15 @@ def _do_configure_interactive(profile_name: str | None = None, port: int | None 
 
     env_key = PROVIDER_API_KEYS[provider]
     print()
+
+    # The server refuses provider "openai" without a URL on the local network.
+    base_url = ""
+    if provider == "openai":
+        base_url = _prompt_text("Base URL of your server (for example http://10.0.0.5:8000/v1)")
+        if not base_url:
+            print("\n\033[31m✗\033[0m A base URL is required.", file=sys.stderr)
+            return 1
+        print()
 
     # API key
     api_key = ""
@@ -415,6 +427,8 @@ def _do_configure_interactive(profile_name: str | None = None, port: int | None 
     }
     if model:
         config_dict["HINDSIGHT_API_LLM_MODEL"] = model
+    if base_url:
+        config_dict["HINDSIGHT_API_LLM_BASE_URL"] = base_url
     if api_key:
         config_dict["HINDSIGHT_API_LLM_API_KEY"] = api_key
 
@@ -1642,10 +1656,10 @@ Global options:
 
 Examples:
     # Create a profile
-    hindsight-embed profile create my-app --port 9100 --env HINDSIGHT_API_LLM_PROVIDER=openai
+    hindsight-embed profile create my-app --port 9100 --env HINDSIGHT_API_LLM_PROVIDER=ollama
 
     # Manage environment variables
-    hindsight-embed profile set-env my-app HINDSIGHT_API_LLM_MODEL gpt-4
+    hindsight-embed profile set-env my-app HINDSIGHT_API_LLM_MODEL llama3.2
     hindsight-embed profile remove-env my-app HINDSIGHT_API_LLM_MODEL
 
     # Use profile with commands

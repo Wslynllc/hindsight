@@ -622,15 +622,6 @@
     "memoryDefenseAction_block": "Block",
     "memoryDefenseSecretLeakTitle": "Secret leak prevention",
     "memoryDefenseSecretLeakDescription": "Scan retained content for secrets. 45 patterns covering common provider keys, AWS, and PII.",
-    "memoryDefenseEnterpriseTitle": "Memory Defense Enterprise",
-    "memoryDefenseEnterpriseSubtitle": "Detect more, redact smarter, and audit everything — available in Hindsight Cloud.",
-    "memoryDefenseEnterpriseFeatureDetectSecrets": "Advanced secret detection: 200+ patterns covering provider keys, AWS, GitHub, and CI tokens",
-    "memoryDefenseEnterpriseFeatureBase64": "Base64 decoding: catch secrets hidden inside encoded payloads",
-    "memoryDefenseEnterpriseFeatureLlm": "LLM screening: catch novel exfiltration patterns regex can't",
-    "memoryDefenseEnterpriseFeaturePromptInjection": "Prompt injection detection: block attempts to override agent behavior",
-    "memoryDefenseEnterpriseFeatureSizeAnomaly": "Size anomaly: reject suspiciously large payloads",
-    "memoryDefenseEnterpriseFeatureProtectedKeys": "Protected tag namespaces: enforce immutable identity tags",
-    "memoryDefenseEnterpriseCta": "Request a Demo",
     "recallTitle": "Recall",
     "recallDescription": "Which retrieval stages run during recall for this bank, and how results are deduplicated",
     "recallServerDefault": "Server Default",
@@ -1923,7 +1914,7 @@
     "resumeMotionLabel": "Play"
   },
   "metadata": {
-    "title": "Hindsight Cloud",
+    "title": "Hindsight",
     "description": "Multi-tenant control plane for Hindsight semantic memory"
   },
   "addDocument": {
@@ -1940,8 +1931,6 @@
     "extractionMethodLabel": "Extraction Method",
     "parserStandardLabel": "Standard",
     "parserStandardDescription": "Free — good for text-based documents; image OCR depends on server configuration",
-    "parserEnhancedLabel": "Enhanced (Iris)",
-    "parserEnhancedDescription": "Additional charge — better quality for complex layouts, scanned documents, and images",
     "contextLabel": "Context",
     "contextPlaceholder": "Optional context about this document...",
     "eventDateLabel": "Event Date",
@@ -1959,8 +1948,6 @@
     "toastDocumentAddedDescription": "The document has been added and memories are being extracted.",
     "toastFilesSkipped": "Some files were skipped",
     "toastFilesSkippedDescription": "Only supported file types are allowed (PDF, Word, PowerPoint, Excel, images, and text files).",
-    "toastImagesRequireIris": "Images require Enhanced (Iris) extraction",
-    "toastImagesRequireIrisDescription": "Switch to Enhanced extraction to upload: {names}",
     "toastUploadingSingle": "Uploading {name}...",
     "toastUploadingMultiple": "Uploading {count} files...",
     "toastFileUploaded": "File uploaded",

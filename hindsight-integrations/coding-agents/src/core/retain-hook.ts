@@ -16,7 +16,6 @@
 import { deriveBankIdOrSkip } from "./bank";
 import { retainLiveSession } from "./chat";
 import { applyBankConfig, loadConfig } from "./config";
-import { DAEMON_WAIT_RETAIN_MS, ensureDaemon } from "./daemon";
 import { diag, readHookEvent } from "./diag";
 import { describeError, log, setLogLevel } from "./log";
 import type { ClientOpts } from "./hindsight";
@@ -62,7 +61,7 @@ export interface RetainHookSpec {
   /** Read the fields out of the harness's stdin event (shapes differ per harness). */
   parse(event: Record<string, unknown>): RetainHookEventFields;
   /** Optional event gate for one entry point registered on multiple host events. Evaluated before
-   *  config loading or daemon startup, so irrelevant notifications stay cheap no-ops. */
+   *  config loading, so irrelevant notifications stay cheap no-ops. */
   accept?(event: Record<string, unknown>): boolean;
   /** Harness-specific transcript parser. Defaults to the Claude JSONL reader. */
   readTranscript?: TranscriptReader;
@@ -227,19 +226,12 @@ export async function runRetainHook(
   const bankId = resolved.bankId;
   if (cfg.disabled) return; // per-bank opt-out (banks.<id> override)
   // Checked only HERE, after the bank is resolved, so a `banks.<id>` section can turn write-back
-  // back on for one repo under a global `retainSessions: false` (and vice versa). Before the
-  // daemon start below: a session that writes nothing has no reason to bring a server up. It still
+  // back on for one repo under a global `retainSessions: false` (and vice versa). It still
   // reads the transcript, because usage is recorded either way — it is a local file (#5391).
   let client: RetainClient | undefined;
   if (!cfg.retainSessions) {
     diag(spec.harness, "retain_disabled", { bank: bankId, session: sessionId });
   } else {
-    // Last chance to get the daemon up: this is the write path, and a session whose daemon never
-    // started would otherwise lose its whole conversation. The Stop hook has the longest budget of
-    // any hook and nothing is waiting on its result, so it can afford the longer wait.
-    // Deliberately NOT gated on the result — retain proceeds either way, so an unreachable daemon
-    // produces the same `retain_failed` diagnostic as an unreachable Cloud/self-hosted server.
-    await ensureDaemon(cfg, spec.harness, { waitMs: DAEMON_WAIT_RETAIN_MS });
     client = makeClient({
       apiUrl: cfg.apiUrl,
       apiToken: cfg.apiToken,

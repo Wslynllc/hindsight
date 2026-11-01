@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from hindsight_api.config import DEFAULT_FILE_PARSER_MARKITDOWN_OCR_PROMPT
 
+from ... import local_only
 from ..providers.openai_compatible_headers import with_openai_compatible_user_agent
 from .base import FileParser
 
@@ -70,6 +71,7 @@ def _validate_ocr_config(*, api_key: str | None, base_url: str | None, model: st
             "Markitdown OCR is enabled but no base URL is configured. "
             "Set HINDSIGHT_API_FILE_PARSER_MARKITDOWN_OCR_BASE_URL to an OpenAI-compatible OCR/vision endpoint."
         )
+    local_only.check_url(base_url, "HINDSIGHT_API_FILE_PARSER_MARKITDOWN_OCR_BASE_URL")
 
 
 class MarkitdownParser(FileParser):

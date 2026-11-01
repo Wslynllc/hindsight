@@ -7,6 +7,7 @@ import type {
   RetainRequest,
 } from "./types.js";
 import { HindsightServer, type Logger } from "@vectorize-io/hindsight-all";
+import { isVendorHosted, VENDOR_HOSTED_REFUSED } from "./vendor-host.js";
 import {
   HindsightClient,
   type HindsightClientOptions,
@@ -1748,6 +1749,9 @@ export function detectLLMConfig(pluginConfig?: PluginConfig): {
   baseUrl?: string;
   source: string;
 } {
+  // Before the embedded fallback below: a refused URL must stop here, not start a local daemon.
+  if (isVendorHosted(pluginConfig?.hindsightApiUrl)) throw new Error(VENDOR_HOSTED_REFUSED);
+
   // External API mode: the daemon handles LLM credentials, plugin doesn't need them.
   const externalApiCheck = detectExternalApi(pluginConfig);
   if (externalApiCheck.apiUrl) {
@@ -1801,6 +1805,7 @@ export function detectExternalApi(pluginConfig?: PluginConfig): {
   apiUrl: string | null;
   apiToken: string | null;
 } {
+  if (isVendorHosted(pluginConfig?.hindsightApiUrl)) return { apiUrl: null, apiToken: null };
   return {
     apiUrl: pluginConfig?.hindsightApiUrl ?? null,
     apiToken: pluginConfig?.hindsightApiToken ?? null,

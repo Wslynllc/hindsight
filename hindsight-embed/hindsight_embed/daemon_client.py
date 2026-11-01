@@ -19,10 +19,9 @@ _manager = DaemonEmbedManager()
 
 # CLI paths - check multiple locations
 CLI_INSTALL_DIRS = [
-    Path.home() / ".local" / "bin",  # Standard location from get-cli installer
+    Path.home() / ".local" / "bin",
     Path.home() / ".hindsight" / "bin",  # Alternative location
 ]
-CLI_INSTALLER_URL = "https://hindsight.vectorize.io/get-cli"
 
 
 def get_daemon_url(profile: str | None = None) -> str:
@@ -181,67 +180,19 @@ def is_cli_installed() -> bool:
     return find_cli_binary() is not None
 
 
-def install_cli() -> bool:
-    """
-    Install the hindsight CLI using the official installer.
-
-    Returns True if installation succeeded.
-    """
-    import subprocess
+def ensure_cli_installed() -> bool:
+    """Report a missing CLI. This fork never downloads one: upstream piped a vendor script to bash."""
     import sys
 
-    from . import __version__
-
-    # Determine CLI version (use env var or match embed version)
-    cli_version = os.getenv("HINDSIGHT_EMBED_CLI_VERSION", __version__)
-
-    print(f"Installing hindsight CLI (version {cli_version})...")
-    print(f"  Installer URL: {CLI_INSTALLER_URL}")
-
-    try:
-        # Download and run installer with version env var
-        env = os.environ.copy()
-        env["HINDSIGHT_CLI_VERSION"] = cli_version
-
-        result = subprocess.run(
-            ["bash", "-c", f"curl -fsSL {CLI_INSTALLER_URL} | bash"],
-            capture_output=True,
-            text=True,
-            env=env,
-        )
-
-        if result.returncode != 0:
-            print(f"CLI installation failed (exit code {result.returncode}):", file=sys.stderr)
-            if result.stdout:
-                print(f"  stdout: {result.stdout}", file=sys.stderr)
-            if result.stderr:
-                print(f"  stderr: {result.stderr}", file=sys.stderr)
-            return False
-
-        cli_binary = find_cli_binary()
-        if cli_binary:
-            print(f"CLI installed to {cli_binary}")
-            return True
-        else:
-            print("CLI installation completed but binary not found", file=sys.stderr)
-            print(f"  stdout: {result.stdout}", file=sys.stderr)
-            print(f"  stderr: {result.stderr}", file=sys.stderr)
-            # Check known locations
-            for install_dir in CLI_INSTALL_DIRS:
-                binary = install_dir / "hindsight"
-                print(f"  Checking {binary}: exists={binary.exists()}", file=sys.stderr)
-            return False
-
-    except Exception as e:
-        print(f"CLI installation failed: {e}", file=sys.stderr)
-        return False
-
-
-def ensure_cli_installed() -> bool:
-    """Ensure CLI is installed, installing if needed."""
     if is_cli_installed():
         return True
-    return install_cli()
+    print(
+        "Error: hindsight CLI not found, and this fork does not download it. "
+        "Build it from hindsight-cli/ with `cargo build --release`, then put the `hindsight` "
+        "binary on PATH or in ~/.local/bin.",
+        file=sys.stderr,
+    )
+    return False
 
 
 def run_cli(args: list[str], config: dict, profile: str | None = None) -> int:

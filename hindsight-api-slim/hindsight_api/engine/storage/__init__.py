@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from urllib.parse import quote
 
+from ... import local_only
 from ...schema_context import get_current_schema
 from .base import FileStorage
 from .postgresql import PostgreSQLFileStorage
@@ -69,6 +70,10 @@ def create_file_storage(
     extension_storage = _load_file_storage_extension()
     if extension_storage is not None:
         return extension_storage
+
+    from ...config import get_config
+
+    local_only.check_file_storage(storage_type, get_config().file_storage_s3_endpoint)
 
     if storage_type == "native":
         if not pool_getter:

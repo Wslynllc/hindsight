@@ -376,8 +376,8 @@ def test_daemon_child_env_var_set_in_daemon_env(temp_home, monkeypatch):
     assert env.get("_HINDSIGHT_DAEMON_CHILD") == "1"
 
 
-def test_daemon_preserves_uv_python_for_nested_uvx(temp_home, monkeypatch):
-    """The API uvx fallback inherits the interpreter selected by the integration."""
+def test_daemon_preserves_uv_python_for_a_uv_launcher(temp_home, monkeypatch):
+    """A uv-launched API inherits the interpreter selected by the integration."""
     from unittest.mock import MagicMock, patch
 
     from hindsight_embed.daemon_embed_manager import DaemonEmbedManager
@@ -389,7 +389,7 @@ def test_daemon_preserves_uv_python_for_nested_uvx(temp_home, monkeypatch):
 
     def fake_find_api_command(api_version, env=None):
         captured["find_env"] = env
-        return ["uvx", f"hindsight-api@{api_version}"]
+        return ["uv", "run", "hindsight-api"]
 
     def fake_popen(cmd, env, **kwargs):
         captured["popen_env"] = env

@@ -622,15 +622,6 @@
     "memoryDefenseAction_block": "ブロック",
     "memoryDefenseSecretLeakTitle": "シークレット漏洩防止",
     "memoryDefenseSecretLeakDescription": "保持されたコンテンツのシークレットをスキャンします。一般的なプロバイダーキー、AWS、個人情報をカバーする45パターン。",
-    "memoryDefenseEnterpriseTitle": "Memory Defense Enterprise",
-    "memoryDefenseEnterpriseSubtitle": "より多くを検出し、よりスマートに編集し、すべてを監査 — Hindsight Cloudで利用可能。",
-    "memoryDefenseEnterpriseFeatureDetectSecrets": "高度なシークレット検出:プロバイダーキー、AWS、GitHub、CIトークンをカバーする200以上のパターン",
-    "memoryDefenseEnterpriseFeatureBase64": "Base64デコード:エンコードされたペイロード内の隠されたシークレットを検出",
-    "memoryDefenseEnterpriseFeatureLlm": "LLMスクリーニング:正規表現では捉えられない新しいエクスフィルトレーションパターンを検出",
-    "memoryDefenseEnterpriseFeaturePromptInjection": "プロンプトインジェクション検出:エージェントの動作を上書きする試みをブロック",
-    "memoryDefenseEnterpriseFeatureSizeAnomaly": "サイズ異常:疑わしく大きいペイロードを拒否",
-    "memoryDefenseEnterpriseFeatureProtectedKeys": "保護されたタグ名前空間:不変のアイデンティティタグを強制",
-    "memoryDefenseEnterpriseCta": "デモをリクエスト",
     "recallTitle": "リコール",
     "recallDescription": "このバンクのリコール時に実行される検索ステージと、結果の重複除去",
     "recallServerDefault": "サーバーのデフォルト",
@@ -1923,7 +1914,7 @@
     "resumeMotionLabel": "再開"
   },
   "metadata": {
-    "title": "Hindsight Cloud",
+    "title": "Hindsight",
     "description": "Hindsightセマンティックメモリのマルチテナントコントロールプレーン"
   },
   "addDocument": {
@@ -1940,8 +1931,6 @@
     "extractionMethodLabel": "抽出方法",
     "parserStandardLabel": "標準",
     "parserStandardDescription": "無料 — テキストベースのドキュメント向け。画像 OCR はサーバー設定に依存します",
-    "parserEnhancedLabel": "高度（Iris）",
-    "parserEnhancedDescription": "追加料金 — 複雑なレイアウト、スキャンされたドキュメント、画像に対してより高品質",
     "contextLabel": "コンテキスト",
     "contextPlaceholder": "このドキュメントに関するオプションのコンテキスト...",
     "eventDateLabel": "イベント日付",
@@ -1959,8 +1948,6 @@
     "toastDocumentAddedDescription": "ドキュメントが追加され、メモリが抽出されています。",
     "toastFilesSkipped": "一部のファイルがスキップされました",
     "toastFilesSkippedDescription": "サポートされているファイルタイプのみ許可されています（PDF、Word、PowerPoint、Excel、画像、テキストファイル）。",
-    "toastImagesRequireIris": "画像には高度（Iris）抽出が必要です",
-    "toastImagesRequireIrisDescription": "高度な抽出に切り替えてアップロード：{names}",
     "toastUploadingSingle": "{name}をアップロード中...",
     "toastUploadingMultiple": "{count}件のファイルをアップロード中...",
     "toastFileUploaded": "ファイルがアップロードされました",

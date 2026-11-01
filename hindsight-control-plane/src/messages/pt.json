@@ -622,15 +622,6 @@
     "memoryDefenseAction_block": "Bloquear",
     "memoryDefenseSecretLeakTitle": "Prevenção de vazamento de segredos",
     "memoryDefenseSecretLeakDescription": "Verifica o conteúdo retido em busca de segredos. 45 padrões cobrindo chaves comuns de provedores, AWS e informações pessoais.",
-    "memoryDefenseEnterpriseTitle": "Memory Defense Enterprise",
-    "memoryDefenseEnterpriseSubtitle": "Detecte mais, edite com mais inteligência e audite tudo: disponível no Hindsight Cloud.",
-    "memoryDefenseEnterpriseFeatureDetectSecrets": "Detecção avançada de segredos: mais de 200 padrões cobrindo chaves de provedores, AWS, GitHub e tokens de CI",
-    "memoryDefenseEnterpriseFeatureBase64": "Decodificação Base64: detecta segredos ocultos em cargas codificadas",
-    "memoryDefenseEnterpriseFeatureLlm": "Triagem por LLM: detecta padrões novos de exfiltração que regex não consegue",
-    "memoryDefenseEnterpriseFeaturePromptInjection": "Detecção de injeção de prompt: bloqueia tentativas de sobrescrever o comportamento do agente",
-    "memoryDefenseEnterpriseFeatureSizeAnomaly": "Anomalia de tamanho: rejeita cargas suspeitamente grandes",
-    "memoryDefenseEnterpriseFeatureProtectedKeys": "Namespaces de tags protegidos: aplica tags de identidade imutáveis",
-    "memoryDefenseEnterpriseCta": "Solicitar uma demonstração",
     "recallTitle": "Recall",
     "recallDescription": "Quais etapas de recuperação são executadas durante o recall neste banco e como os resultados são deduplicados",
     "recallServerDefault": "Padrão do servidor",
@@ -1923,7 +1914,7 @@
     "resumeMotionLabel": "Retomar"
   },
   "metadata": {
-    "title": "Hindsight Cloud",
+    "title": "Hindsight",
     "description": "Plano de controle multi-inquilino para a memória semântica Hindsight"
   },
   "addDocument": {
@@ -1940,8 +1931,6 @@
     "extractionMethodLabel": "Método de Extração",
     "parserStandardLabel": "Padrão",
     "parserStandardDescription": "Gratuito — bom para documentos baseados em texto; OCR de imagens depende da configuração do servidor",
-    "parserEnhancedLabel": "Aprimorado (Iris)",
-    "parserEnhancedDescription": "Custo adicional — melhor qualidade para layouts complexos, documentos digitalizados e imagens",
     "contextLabel": "Contexto",
     "contextPlaceholder": "Contexto opcional sobre este documento...",
     "eventDateLabel": "Data do Evento",
@@ -1959,8 +1948,6 @@
     "toastDocumentAddedDescription": "O documento foi adicionado e as memórias estão sendo extraídas.",
     "toastFilesSkipped": "Alguns arquivos foram ignorados",
     "toastFilesSkippedDescription": "Apenas tipos de arquivo suportados são permitidos (PDF, Word, PowerPoint, Excel, imagens e arquivos de texto).",
-    "toastImagesRequireIris": "Imagens requerem extração Aprimorada (Iris)",
-    "toastImagesRequireIrisDescription": "Mude para extração Aprimorada para enviar: {names}",
     "toastUploadingSingle": "Enviando {name}...",
     "toastUploadingMultiple": "Enviando {count} arquivos...",
     "toastFileUploaded": "Arquivo enviado",

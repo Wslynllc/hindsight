@@ -298,10 +298,7 @@ def main():
     # Configure logging
     config.configure_logging()
 
-    # Initialize OpenTelemetry tracing if enabled. The worker runs consolidation,
-    # batch retain and mental-model refresh, so without this the LLM-heaviest half
-    # of a deployment emits no spans at all (issue #3614). Done after logging setup
-    # so the "Tracing initialized" line is visible.
+    # Never exports anything in this fork; see tracing.py.
     from ..tracing import initialize_tracing_from_config
 
     initialize_tracing_from_config(config, default_service_name="hindsight-worker")

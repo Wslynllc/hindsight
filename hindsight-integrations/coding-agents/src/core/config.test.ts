@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadConfig, applyBankConfig, readEnvConfig, resolveConfig } from "./config";
+import { loadConfig, applyBankConfig, readEnvConfig, resolveConfig, usableApiUrl } from "./config";
 import { log } from "./log";
 
 let root: string;
@@ -22,20 +22,70 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-describe("loadConfig layering", () => {
-  it("missing files yield defaults", () => {
-    const cfg = loadConfig({ path: join(root, "nope.json") });
-    expect(cfg.apiUrl).toBe("https://api.hindsight.vectorize.io");
-    expect(cfg.bankId).toBeUndefined();
-    expect(cfg.disabled).toBe(false);
+describe("usableApiUrl", () => {
+  it.each([
+    "https://api.hindsight.vectorize.io",
+    "https://vectorize.io",
+    "http://ui.hindsight.vectorize.io:8888/v1",
+    "HTTPS://API.HINDSIGHT.VECTORIZE.IO",
+    "https://api.hindsight.vectorize.io./",
+    "https://user:pw@api.hindsight.vectorize.io",
+    "  https://api.hindsight.vectorize.io  ",
+    "api.hindsight.vectorize.io",
+    "ftp://box:8888",
+    "",
+    8888,
+    undefined,
+  ])("refuses %j", (url) => {
+    expect(usableApiUrl(url)).toBe("");
   });
 
-  it("malformed global file falls back to defaults with a warning", () => {
+  // A suffix or substring match would refuse someone's own server.
+  it.each([
+    "http://localhost:8888",
+    "http://10.0.0.5:8888",
+    "https://hindsight.home.arpa",
+    "https://notvectorize.io",
+    "https://vectorize.io.home.arpa",
+    "https://home.arpa/vectorize.io",
+  ])("keeps %s", (url) => {
+    expect(usableApiUrl(url)).toBe(url);
+  });
+});
+
+describe("loadConfig layering", () => {
+  it("missing files yield defaults, which name no server, so memory is off", () => {
+    const cfg = loadConfig({ path: join(root, "nope.json") });
+    expect(cfg.apiUrl).toBe("");
+    expect(cfg.bankId).toBeUndefined();
+    expect(cfg.disabled).toBe(true);
+  });
+
+  it("the defaults leave costly and hosted work off", () => {
+    const cfg = resolveConfig({});
+    expect(cfg.apiUrl).toBe("");
+    expect(cfg.optInOnly).toBe(true);
+    expect(cfg.codebaseSurvey).toBe(false);
+    expect(cfg.gitIngest).toBe("none");
+    expect(cfg.pageTriggerType).toBe("manual");
+    expect(cfg.autoInject).toBe("recall");
+  });
+
+  it("malformed global file turns memory off with a warning, whatever the env says", () => {
     writeFileSync(globalCfg, "{not json");
+    vi.stubEnv("HINDSIGHT_API_URL", "http://server");
     const err = vi.spyOn(console, "error").mockImplementation(() => {});
     const cfg = loadConfig({ path: globalCfg });
-    expect(cfg.apiUrl).toBe("https://api.hindsight.vectorize.io");
+    expect(cfg.disabled).toBe(true);
     expect(err).toHaveBeenCalledOnce();
+    err.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
+  it("an unrecognised HINDSIGHT_OPT_IN_ONLY keeps opt-in on", () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(resolveConfig(readEnvConfig({ HINDSIGHT_OPT_IN_ONLY: "nope" })).optInOnly).toBe(true);
+    expect(resolveConfig(readEnvConfig({ HINDSIGHT_OPT_IN_ONLY: "false" })).optInOnly).toBe(false);
     err.mockRestore();
   });
 
@@ -296,6 +346,7 @@ describe("defaultBankConfig (#4725)", () => {
 describe("banks.<bankId> overrides (per-repo opt-in/out, applied AFTER bank resolution)", () => {
   it("overrides behavioral fields for the matching bank only; others untouched", () => {
     const cfg = resolveConfig({
+      apiUrl: "http://server",
       gitIngest: "message",
       banks: {
         "coding-agent::secret": { disabled: true },
@@ -345,6 +396,7 @@ describe("banks.<id>.bank — rename inside the banks tree", () => {
 
   it("single hop: the rename target's own section is NOT consulted (no chaining)", () => {
     const cfg = resolveConfig({
+      apiUrl: "http://server",
       banks: {
         a: { bank: "b" },
         b: { bank: "c", disabled: true }, // must not apply to the a->b hop
@@ -386,11 +438,12 @@ describe("environment fallback", () => {
   });
 
   it("autoInject: explicit mode wins, legacy autoReflect=false maps to none, junk falls back", () => {
-    expect(resolveConfig({}).autoInject).toBe("reflect");
+    expect(resolveConfig({}).autoInject).toBe("recall");
+    expect(resolveConfig({ autoReflect: true }).autoInject).toBe("reflect");
     expect(resolveConfig({ autoInject: "pages" }).autoInject).toBe("pages");
     expect(resolveConfig({ autoInject: "recall", autoReflect: false }).autoInject).toBe("recall");
     expect(resolveConfig({ autoReflect: false }).autoInject).toBe("none");
-    expect(resolveConfig({ autoInject: "bogus" as never }).autoInject).toBe("reflect");
+    expect(resolveConfig({ autoInject: "bogus" as never }).autoInject).toBe("recall");
     const base = resolveConfig({ autoInject: "pages", banks: { b: { autoReflect: false } } });
     expect(applyBankConfig(base, "b").cfg.autoInject).toBe("none");
     expect(applyBankConfig(base, "other").cfg.autoInject).toBe("pages");

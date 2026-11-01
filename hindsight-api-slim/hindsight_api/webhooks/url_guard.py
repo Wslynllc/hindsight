@@ -28,6 +28,7 @@ import aiohttp
 from aiohttp.abc import AbstractResolver, ResolveResult
 from yarl import URL
 
+from .. import local_only
 from ..engine.aiohttp_session import LoopLocalSession, UpstreamHTTPError, per_phase_timeout
 
 _ALLOWED_SCHEMES = ("http", "https")
@@ -152,6 +153,12 @@ def _parse_target(url: str) -> URL:
         raise WebhookURLError(f"Webhook URL scheme must be http or https, got '{parsed.scheme or 'empty'}'")
     if not host:
         raise WebhookURLError("Webhook URL must include a host")
+    # On top of the SSRF block above, and not instead of it: a local host must still be
+    # on HINDSIGHT_API_WEBHOOK_ALLOWED_HOSTS.
+    try:
+        local_only.check_url(url, "Webhook URL")
+    except local_only.LocalOnlyError as exc:
+        raise WebhookURLError(str(exc)) from exc
     return parsed
 
 

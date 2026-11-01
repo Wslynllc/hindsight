@@ -6,10 +6,10 @@
  * pair) describe a pipeline this package replaced outright, and quietly reinterpreting the rest
  * would be worse than leaving them behind.
  *
- * Why it matters: someone running the old plugin against a self-hosted server or a local daemon
- * has already decided where their prompts and transcripts go. Installing this package and
- * defaulting to Cloud would silently start sending them somewhere else. Adopting the endpoint they
- * already chose is the conservative move, not the convenient one.
+ * Why it matters: someone running the old plugin against a self-hosted server has already decided
+ * where their prompts and transcripts go. Adopting that endpoint is the conservative move, not the
+ * convenient one. Only a usable URL carries: the vendor's hosted service is refused, and the old
+ * plugin's empty URL meant a local daemon, which this build does not have.
  *
  * Conversations are NOT carried here — they are re-imported from local transcripts
  * (`--import-conversations`, see core/history.ts). That path re-extracts them as new documents,
@@ -21,7 +21,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, relative, isAbsolute } from "node:path";
-import { DEFAULT_DAEMON_PORT } from "./config";
+import { usableApiUrl } from "./config";
 
 /** The old per-agent Claude Code plugin's name in Claude's plugin registry (`<name>@<marketplace>`). */
 const LEGACY_CLAUDE_PLUGIN = "hindsight-memory";
@@ -103,24 +103,13 @@ export function legacyConfigPath(harness: string, home: string = homedir()): str
 export interface LegacyEndpoint {
   /** Which old plugin it came from, for the installer's output. */
   harness: string;
-  serverMode: "cloud" | "self-hosted" | "daemon";
-  apiUrl?: string;
+  apiUrl: string;
   apiToken?: string;
-  /** Only when it differs from the default — in daemon mode the port IS the endpoint. */
-  apiPort?: number;
   /** The file it came from, so the installer can say where it looked. */
   source: string;
 }
 
-const CLOUD_URL = "https://api.hindsight.vectorize.io";
-
-/**
- * Read the old plugin's endpoint, or undefined when it was never configured.
- *
- * An ABSENT `hindsightApiUrl` is meaningful rather than missing: the old plugin treated an empty
- * URL as "use the local daemon on `apiPort`" (`daemon.py:get_api_url`), so a config file that
- * never set one describes daemon mode, not an unconfigured user.
- */
+/** Read the old plugin's endpoint, or undefined when it names none this build may use. */
 export function readLegacyEndpoint(
   home: string = homedir(),
   prefer: readonly string[] = []
@@ -149,24 +138,8 @@ function readOne(harness: string, home: string): LegacyEndpoint | undefined {
   }
   if (!raw || typeof raw !== "object") return undefined;
 
+  const apiUrl = usableApiUrl(raw.hindsightApiUrl);
+  if (!apiUrl) return undefined;
   const apiToken = typeof raw.hindsightApiToken === "string" ? raw.hindsightApiToken : undefined;
-  const url = typeof raw.hindsightApiUrl === "string" ? raw.hindsightApiUrl.trim() : "";
-
-  if (url) {
-    return {
-      harness,
-      serverMode: url.replace(/\/+$/, "") === CLOUD_URL ? "cloud" : "self-hosted",
-      apiUrl: url,
-      ...(apiToken ? { apiToken } : {}),
-      source,
-    };
-  }
-  const port = typeof raw.apiPort === "number" ? raw.apiPort : undefined;
-  return {
-    harness,
-    serverMode: "daemon",
-    ...(apiToken ? { apiToken } : {}),
-    ...(port && port !== DEFAULT_DAEMON_PORT ? { apiPort: port } : {}),
-    source,
-  };
+  return { harness, apiUrl, ...(apiToken ? { apiToken } : {}), source };
 }

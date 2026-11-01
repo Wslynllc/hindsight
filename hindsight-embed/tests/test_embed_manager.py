@@ -15,6 +15,8 @@ import pytest
 from hindsight_embed import get_embed_manager
 from hindsight_embed._http_probe import ProbeResponse
 from hindsight_embed.daemon_embed_manager import (
+    ApiUnavailableError,
+    ControlPlaneUnavailableError,
     DaemonEmbedManager,
     _detach_popen_kwargs,
     _runs_a_foreign_interpreter,
@@ -106,34 +108,25 @@ def _spawned_env(manager, tmp_path, monkeypatch) -> dict:
     return popen.call_args.kwargs["env"]
 
 
-def test_uvx_fallback_does_not_inherit_the_parent_interpreter_env(tmp_path, monkeypatch):
-    """A host that finds its own site-packages via PYTHONPATH (Hermes' package-manager install
-    exports its Python 3.14 generation) must not hand that directory to uvx's own interpreter:
-    hindsight-api would import the host's pydantic and fail on the missing compiled extension."""
+def test_a_uv_launcher_does_not_inherit_the_parent_interpreter_env(tmp_path, monkeypatch):
+    """`uv run --project <api-slim>` resolves that project's own environment. A host that finds its
+    own site-packages via PYTHONPATH (Hermes' package-manager install exports its Python 3.14
+    generation) must not hand that directory to uv's interpreter: hindsight-api would import the
+    host's pydantic and fail on the missing compiled extension."""
     monkeypatch.setenv("PYTHONPATH", "/host/venv/lib/python3.14/site-packages")
     monkeypatch.setenv("PYTHONHOME", "/host/python")
     monkeypatch.setenv("VIRTUAL_ENV", "/host/venv")
     monkeypatch.setenv("PATH", "/host/venv/bin:/usr/bin")
     manager = _startup_manager(MagicMock(return_value=False))
-    manager._find_api_command = MagicMock(return_value=["uvx", "hindsight-api@0.0.0"])
-
-    env = _spawned_env(manager, tmp_path, monkeypatch)
-
-    assert "PYTHONPATH" not in env and "PYTHONHOME" not in env and "VIRTUAL_ENV" not in env
-    assert env["PATH"] == "/host/venv/bin:/usr/bin"  # uvx itself is found through PATH
-    assert env["HINDSIGHT_API_DAEMON_LOG"] == str(tmp_path / "daemon.log")
-
-
-def test_the_dev_uv_run_command_does_not_inherit_it_either(tmp_path, monkeypatch):
-    """`uv run --project <api-slim>` resolves that project's own environment, so it is as foreign
-    as uvx: a monorepo checkout under a host that exports PYTHONPATH would hit the same crash."""
-    monkeypatch.setenv("PYTHONPATH", "/host/venv/lib/python3.14/site-packages")
-    manager = _startup_manager(MagicMock(return_value=False))
     manager._find_api_command = MagicMock(
         return_value=["uv", "run", "--project", "/repo/hindsight-api-slim", "--extra", "all", "hindsight-api"]
     )
 
-    assert "PYTHONPATH" not in _spawned_env(manager, tmp_path, monkeypatch)
+    env = _spawned_env(manager, tmp_path, monkeypatch)
+
+    assert "PYTHONPATH" not in env and "PYTHONHOME" not in env and "VIRTUAL_ENV" not in env
+    assert env["PATH"] == "/host/venv/bin:/usr/bin"  # uv itself is found through PATH
+    assert env["HINDSIGHT_API_DAEMON_LOG"] == str(tmp_path / "daemon.log")
 
 
 def test_a_resolved_launcher_path_is_still_recognised(tmp_path, monkeypatch):
@@ -141,22 +134,21 @@ def test_a_resolved_launcher_path_is_still_recognised(tmp_path, monkeypatch):
     resolved, so resolving the launcher too must not silently stop the scrub."""
     monkeypatch.setenv("PYTHONPATH", "/host/site-packages")
     manager = _startup_manager(MagicMock(return_value=False))
-    manager._find_api_command = MagicMock(return_value=["/opt/tools/uvx", "hindsight-api@0.0.0"])
+    manager._find_api_command = MagicMock(return_value=["/opt/tools/uv", "run", "hindsight-api"])
 
     assert "PYTHONPATH" not in _spawned_env(manager, tmp_path, monkeypatch)
 
 
 def test_only_uv_launchers_count_as_foreign():
-    assert _runs_a_foreign_interpreter(["uvx", "hindsight-api@1.0.0"])
     assert _runs_a_foreign_interpreter(["uv", "run", "--project", "/x", "hindsight-api"])
-    assert _runs_a_foreign_interpreter(["/opt/bin/uvx.exe", "hindsight-api@1.0.0"])
+    assert _runs_a_foreign_interpreter(["/opt/bin/uv.exe", "run", "hindsight-api"])
     assert not _runs_a_foreign_interpreter(["/venv/bin/hindsight-api"])
     assert not _runs_a_foreign_interpreter(["/target/bin/hindsight-api"])
 
 
 def test_installed_binary_keeps_the_parent_interpreter_env(tmp_path, monkeypatch):
     """A `pip install --target` layout (issue #1240) needs PYTHONPATH to import hindsight_api;
-    the scrub applies only to the uvx fallback."""
+    the scrub applies only to uv launchers."""
     monkeypatch.setenv("PYTHONPATH", "/target")
     manager = _startup_manager(MagicMock(return_value=False))
     manager._find_api_command = MagicMock(return_value=["/target/bin/hindsight-api"])
@@ -311,41 +303,21 @@ def test_register_profile_calls_create_when_api_keys_present():
     )
 
 
-def test_find_ui_command_uses_npx_yes_flag_when_npx_not_on_path(monkeypatch):
-    """When npx is not on PATH, fall back to a bare `npx -y` command so the
-    surrounding FileNotFoundError handler can report a clean install hint."""
-    manager = DaemonEmbedManager()
-
-    with patch("pathlib.Path.exists", return_value=False), patch("shutil.which", return_value=None):
-        assert manager._find_ui_command("9.9.9") == [
-            "npx",
-            "-y",
-            "@vectorize-io/hindsight-control-plane@9.9.9",
-        ]
-
-
-def test_find_ui_command_resolves_npx_absolute_path_with_yes_flag(monkeypatch):
-    """When npx is on PATH, use the resolved absolute path (Windows detached
-    processes don't always inherit PATH — see embed_manager._find_ui_command).
-    Either way, `-y` must be set so first-run installs don't block on a prompt."""
+def test_find_ui_command_never_falls_back_to_npx():
+    """Outside a checkout the UI is unavailable, even with npx right there on PATH."""
     manager = DaemonEmbedManager()
 
     with patch("pathlib.Path.exists", return_value=False), patch("shutil.which", return_value="/usr/local/bin/npx"):
-        cmd = manager._find_ui_command("9.9.9")
-
-    assert cmd == [
-        "/usr/local/bin/npx",
-        "-y",
-        "@vectorize-io/hindsight-control-plane@9.9.9",
-    ]
+        with pytest.raises(ControlPlaneUnavailableError, match="does not download it from npm"):
+            manager._find_ui_command("9.9.9")
 
 
-def test_find_api_command_prefers_installed_binary_over_uvx(tmp_path, monkeypatch):
+def test_find_api_command_prefers_installed_binary(tmp_path, monkeypatch):
     """
     When hindsight-api is installed alongside hindsight-embed (e.g. via
     `pip install hindsight-all`), _find_api_command should invoke that
-    binary directly rather than shelling out to uvx. Uses sysconfig to
-    locate the venv's scripts directory (issue #1401, #1240).
+    binary directly. Uses sysconfig to locate the venv's scripts directory
+    (issue #1401, #1240).
     """
     scripts_dir = tmp_path / "bin"
     scripts_dir.mkdir()
@@ -364,12 +336,12 @@ def test_find_api_command_prefers_installed_binary_over_uvx(tmp_path, monkeypatc
     assert manager._find_api_command("0.0.0") == [str(api_binary)]
 
 
-def test_find_api_command_skips_slim_binary_without_local_ml(tmp_path, monkeypatch):
+def test_find_api_command_refuses_slim_binary_without_local_ml(tmp_path, monkeypatch):
     """Default local embeddings/reranker need sentence-transformers.
 
     A slim sibling hindsight-api binary can exist without local ML extras
-    installed. In that case, use the uvx full-package fallback instead of
-    starting a daemon that immediately fails during local provider init.
+    installed. Starting it would fail during local provider init, and this
+    fork has no full package to fetch, so the daemon reports that instead.
     """
     scripts_dir = tmp_path / "venv_bin"
     scripts_dir.mkdir()
@@ -378,8 +350,8 @@ def test_find_api_command_skips_slim_binary_without_local_ml(tmp_path, monkeypat
     # Realistic venv layout: the module lives under site-packages, so the
     # __file__-relative --target path (<site-packages>/bin) is distinct from the
     # sysconfig scripts dir and finds no binary. The slim sibling is only in the
-    # sysconfig scripts dir — exactly where the #2676 uvx fallback applies (a
-    # --target bundle's sibling would instead be used unconditionally, per #1240).
+    # sysconfig scripts dir — exactly where this refusal applies (a --target
+    # bundle's sibling would instead be used unconditionally, per #1240).
     module_path = tmp_path / "site-packages" / "hindsight_embed" / "daemon_embed_manager.py"
     module_path.parent.mkdir(parents=True)
     module_path.write_text("")
@@ -390,7 +362,8 @@ def test_find_api_command_skips_slim_binary_without_local_ml(tmp_path, monkeypat
     monkeypatch.setattr("hindsight_embed.daemon_embed_manager.platform.system", lambda: "Linux")
     monkeypatch.setattr("hindsight_embed.daemon_embed_manager.find_spec", lambda name: None)
 
-    assert manager._find_api_command("1.2.3", env={}) == ["uvx", "hindsight-api@1.2.3"]
+    with pytest.raises(ApiUnavailableError, match="does not download it"):
+        manager._find_api_command("1.2.3", env={})
 
 
 def test_find_api_command_allows_slim_binary_with_external_providers(tmp_path, monkeypatch):
@@ -448,10 +421,10 @@ def test_find_api_command_target_install_uses_sibling_even_without_local_ml(tmp_
     """A --target-bundled sibling binary must be used even when local ML deps
     are missing.
 
-    Regression for the #2676 vs #1240 conflict: the "missing sentence-transformers
-    -> uvx" fallback (#2676) applies only to the sysconfig-scripts path (standard
-    venv installs). A deliberate --target bundle must still use its sibling binary,
-    because falling back to uvx on --target installs reintroduces #1240 (enforced
+    Regression for the #2676 vs #1240 conflict: the "missing sentence-transformers"
+    check (#2676) applies only to the sysconfig-scripts path (standard venv
+    installs). A deliberate --target bundle must still use its sibling binary,
+    because refusing on --target installs reintroduces #1240 (enforced
     by the Windows embed smoke test).
     """
     venv_scripts = tmp_path / "venv_bin"
@@ -471,14 +444,15 @@ def test_find_api_command_target_install_uses_sibling_even_without_local_ml(tmp_
     monkeypatch.setattr("hindsight_embed.daemon_embed_manager.sysconfig.get_path", lambda key: str(venv_scripts))
     monkeypatch.setattr("hindsight_embed.daemon_embed_manager.platform.system", lambda: "Linux")
     # Default local providers + no sentence_transformers: the sysconfig path would
-    # fall back to uvx, but the --target sibling must still win.
+    # refuse, but the --target sibling must still win.
     monkeypatch.setattr("hindsight_embed.daemon_embed_manager.find_spec", lambda name: None)
 
     assert manager._find_api_command("1.2.3", env={}) == [str(sibling_bin)]
 
 
-def test_find_api_command_falls_back_to_uvx_when_no_binary(tmp_path, monkeypatch):
-    """Without an installed binary or dev checkout, fall back to uvx."""
+def test_find_api_command_refuses_when_there_is_no_binary(tmp_path, monkeypatch):
+    """Without an installed binary or dev checkout there is nothing to run: uvx would fetch
+    upstream's package, which carries none of this fork's enforcement."""
     scripts_dir = tmp_path / "bin"
     scripts_dir.mkdir()
     # No hindsight-api binary in scripts_dir
@@ -490,7 +464,8 @@ def test_find_api_command_falls_back_to_uvx_when_no_binary(tmp_path, monkeypatch
     monkeypatch.setattr("hindsight_embed.daemon_embed_manager.sysconfig.get_path", lambda key: str(scripts_dir))
     monkeypatch.setattr("hindsight_embed.daemon_embed_manager.platform.system", lambda: "Linux")
 
-    assert manager._find_api_command("1.2.3") == ["uvx", "hindsight-api@1.2.3"]
+    with pytest.raises(ApiUnavailableError, match="does not download it"):
+        manager._find_api_command("1.2.3")
 
 
 def test_find_api_command_windows_uses_exe_suffix(tmp_path, monkeypatch):

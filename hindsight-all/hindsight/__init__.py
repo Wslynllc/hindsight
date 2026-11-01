@@ -10,8 +10,8 @@ Easiest way - Embedded client (recommended):
     # Server starts automatically on first use
     client = HindsightEmbedded(
         profile="myapp",
-        llm_provider="groq",
-        llm_api_key="your-api-key",
+        llm_provider="ollama",
+        llm_base_url="http://localhost:11434/v1",
     )
 
     # Use immediately - no manual server management needed
@@ -25,9 +25,9 @@ Manual server management:
 
     # Start server with embedded PostgreSQL (pg0)
     server = start_server(
-        llm_provider="groq",
-        llm_api_key="your-api-key",
-        llm_model="openai/gpt-oss-120b"
+        llm_provider="ollama",
+        llm_base_url="http://localhost:11434/v1",
+        llm_model="llama3.2"
     )
 
     # Create client
@@ -50,7 +50,7 @@ Using context manager:
     ```python
     from hindsight import HindsightServer, HindsightClient
 
-    with HindsightServer(llm_provider="groq", llm_api_key="...") as server:
+    with HindsightServer(llm_provider="ollama", llm_api_key="...") as server:
         client = HindsightClient(base_url=server.url)
         # ... use client ...
     # Server automatically stops

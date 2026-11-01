@@ -52,13 +52,13 @@ describe("resolveHostMemory", () => {
     const repo = join(root, "my-repo");
     mkdirSync(repo);
     execFileSync("git", ["init", "-q", repo]);
-    writeConfig({});
+    writeConfig({ apiUrl: "http://server", optInOnly: false });
     let { resolveHostMemory } = await loadFactory();
     const own = resolveHostMemory("dsh", repo);
     expect(own.client.project).toBe("my-repo");
     expect(own.bankId).toContain("my-repo");
 
-    writeConfig({ bankId: "shared-memory" });
+    writeConfig({ apiUrl: "http://server", optInOnly: false, bankId: "shared-memory" });
     ({ resolveHostMemory } = await loadFactory());
     expect(resolveHostMemory("dsh", repo).client.project).toBeUndefined();
   });
@@ -113,11 +113,12 @@ describe("resolveHostMemory", () => {
     // `banks.<id>.apiToken` is a legitimate override (it is not stripped by BANK_OVERRIDE_EXCLUDED),
     // so a provider that re-read only the top level would hand back the wrong credential.
     const { resolveHostMemory: probe } = await loadFactory();
-    writeConfig({ apiUrl: "http://server", apiToken: "global" });
+    writeConfig({ apiUrl: "http://server", optInOnly: false, apiToken: "global" });
     const bankId = probe("dsh", root).bankId;
 
     writeConfig({
       apiUrl: "http://server",
+      optInOnly: false,
       apiToken: "global",
       banks: { [bankId]: { apiToken: "per-bank" } },
     });

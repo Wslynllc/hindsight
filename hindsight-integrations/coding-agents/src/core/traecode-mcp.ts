@@ -93,8 +93,8 @@ export const traecodeUserSettingsPath = (home: string): string =>
   join(traecodeUserDataDir(home), "User", "settings.json");
 
 /** Where the hint rate-limit and the installer's "I enabled it" snapshot live — inside the staged
- *  runtime, mirroring auto-update's state precedent (a runtime replace resets them, which at worst
- *  costs one extra hint). Reads and writes here are sandbox-approved via the install-time rule. */
+ *  runtime, so a runtime replace resets them, which at worst costs one extra hint. Reads and
+ *  writes here are sandbox-approved via the install-time rule. */
 export const gateStateFileFor = (dist: string): string =>
   join(dirname(dist), ".workspace-mcp.json");
 

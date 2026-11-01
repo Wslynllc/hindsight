@@ -39,9 +39,9 @@ class Server:
 
         server = Server(
             db_url="pg0",
-            llm_provider="groq",
-            llm_api_key="your-api-key",
-            llm_model="openai/gpt-oss-120b"
+            llm_provider="ollama",
+            llm_base_url="http://localhost:11434/v1",
+            llm_model="llama3.2"
         )
         server.start()
 
@@ -56,9 +56,9 @@ class Server:
     def __init__(
         self,
         db_url: str = "pg0",
-        llm_provider: str = "groq",
+        llm_provider: str = "none",
         llm_api_key: str = "",
-        llm_model: str = "openai/gpt-oss-120b",
+        llm_model: str = "",
         llm_base_url: Optional[str] = None,
         host: str = "127.0.0.1",
         port: Optional[int] = None,
@@ -70,7 +70,7 @@ class Server:
 
         Args:
             db_url: Database URL. Use "pg0" for embedded PostgreSQL.
-            llm_provider: LLM provider ("groq", "openai", "ollama", "gemini", "anthropic", "lmstudio")
+            llm_provider: LLM provider ("ollama", "lmstudio", "llamacpp", "none", or "openai" with a local base URL)
             llm_api_key: API key for the LLM provider
             llm_model: Model name to use
             llm_base_url: Optional custom base URL for LLM API
@@ -219,9 +219,9 @@ class Server:
 
 def start_server(
     db_url: str = "pg0",
-    llm_provider: str = "groq",
+    llm_provider: str = "none",
     llm_api_key: str = "",
-    llm_model: str = "openai/gpt-oss-120b",
+    llm_model: str = "",
     llm_base_url: Optional[str] = None,
     host: str = "127.0.0.1",
     port: Optional[int] = None,
@@ -236,7 +236,7 @@ def start_server(
 
     Args:
         db_url: Database URL. Use "pg0" for embedded PostgreSQL.
-        llm_provider: LLM provider ("groq", "openai", "ollama", "gemini", "anthropic", "lmstudio")
+        llm_provider: LLM provider ("ollama", "lmstudio", "llamacpp", "none", or "openai" with a local base URL)
         llm_api_key: API key for the LLM provider
         llm_model: Model name to use
         llm_base_url: Optional custom base URL for LLM API
@@ -255,9 +255,9 @@ def start_server(
 
         server = start_server(
             db_url="pg0",
-            llm_provider="groq",
-            llm_api_key="your-api-key",
-            llm_model="openai/gpt-oss-120b"
+            llm_provider="ollama",
+            llm_base_url="http://localhost:11434/v1",
+            llm_model="llama3.2"
         )
 
         client = Client(base_url=server.url)

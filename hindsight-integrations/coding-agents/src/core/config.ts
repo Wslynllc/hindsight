@@ -41,51 +41,23 @@ export // HINDSIGHT_CONFIG joins the two env exceptions (diag/log files): it poi
 const CONFIG_PATH =
   process.env.HINDSIGHT_CONFIG || join(homedir(), ".hindsight", "coding-agent.json");
 
-/** Daemon-mode defaults. The port matches the old per-agent Claude Code plugin so a machine that
- *  already ran that daemon keeps using the same one. */
-export const DEFAULT_DAEMON_PORT = 9077;
-export const DEFAULT_DAEMON_PROFILE = "coding-agent";
-
 /** Incremental git-sync settings (see core/sync.ts). */
 /** The config file's shape — every field optional; omitted fields take the documented default. */
 export interface RawConfig {
-  /** Where memory lives. All three modes speak the same HTTP API; they differ only in who runs it:
-   *   "cloud"       — Hindsight Cloud (the default `apiUrl`)
-   *   "self-hosted" — a Hindsight server you run; set `apiUrl` to it
-   *   "daemon"      — a local `hindsight-embed` daemon this plugin starts on demand, at
-   *                   127.0.0.1:{apiPort}. `apiUrl` is ignored in this mode.
-   * Omitted, it is inferred: "daemon" is never assumed, so an existing config keeps talking to
-   * whatever `apiUrl` it already names. */
-  serverMode?: "cloud" | "self-hosted" | "daemon";
-  apiUrl?: string; // Hindsight API base URL (default https://api.hindsight.vectorize.io — Cloud; set to http://localhost:8888 for a local server)
+  /** Omit it. "self-hosted" is the only connection this build has: any other value (a config still
+   *  saying "cloud" or "daemon") leaves no server, so the plugin is inert. */
+  serverMode?: "self-hosted";
+  apiUrl?: string; // http(s) base URL of a Hindsight server you run. There is no default, and the vendor's hosted service is refused: without a usable URL the plugin is inert and sends nothing
   apiToken?: string; // bearer token (optional)
-  /** Daemon mode: port the local daemon listens on (default 9077).
-   *  NOT 8888 — that is the conventional port for a server you run yourself, and a daemon must
-   *  never squat on it. A healthy server already on this port is adopted rather than restarted. */
-  apiPort?: number;
-  /** Daemon mode: seconds of inactivity before the daemon exits. Unset means it never exits on
-   *  its own — `hindsight-embed`'s own default, which every other Hindsight integration also
-   *  ships. This used to default to 300 here, which made the plugin the only thing on the machine
-   *  opting a shared daemon into an auto-exit nobody asked for. There is deliberately no
-   *  stop-on-session-end either: one daemon is shared by every agent and repo on the machine, so
-   *  ending one session must not cut memory out from under another. */
-  daemonIdleTimeout?: number;
-  /** Daemon mode: `hindsight-embed` profile name, i.e. which local database is used (default
-   *  "coding-agent"). Separate profiles keep unrelated setups from sharing memory. */
-  daemonProfile?: string;
-  /** Daemon mode: which `hindsight-embed` release to run via uvx (default "latest"). */
-  embedVersion?: string;
-  /** Daemon mode: local `hindsight-embed` checkout to run instead of a published release (dev). */
-  embedPackagePath?: string;
   bankId?: string; // EXPLICIT memory bank id — set = static bank; unset = per-repo dynamic (core/bank.ts)
   dynamicBankId?: boolean; // force dynamic resolution even when bankId is set (default: dynamic iff no bankId)
   bankIdTemplate?: string; // dynamic bank id format (default "coding-agent::{gitProject}" — harness-neutral) —
   //   placeholders: {gitProject} {project} {harness} {channel} {user} (see core/bank.ts)
   mapPathToBank?: Record<string, string>; // absolute path -> bank; longest prefix wins; overrides everything
   resolveWorktrees?: boolean; // {gitProject}: worktrees share the main repo's bank (default true)
-  /** Run memory ONLY in projects that were opted in (default false: every project gets memory,
-   *  which is what makes the plugin zero-setup). With it on, an unlisted project is inert — no
-   *  bank is created, nothing is retained, no seed runs — so unrelated work leaves no trace. */
+  /** Run memory ONLY in projects that were opted in (default true; only a literal `false` turns it
+   *  off). An unlisted project is inert — no bank is created, nothing is retained, no seed runs — so
+   *  unrelated work leaves no trace. */
   optInOnly?: boolean;
   /** Directories opted in, matched as PREFIXES with `~` expanded: approving a directory approves
    *  the repos beneath it, and each still gets its own dynamic bank. A `mapPathToBank` entry counts
@@ -124,7 +96,7 @@ export interface RawConfig {
    *  timeout. The automatic session-start reflect is NOT affected — it always uses "low" to fit
    *  its hook window. */
   reflectBudget?: "low" | "mid" | "high";
-  /** What to inject on the session's first prompt (default "reflect"):
+  /** What to inject on the session's first prompt (default "recall"):
    *    "reflect" — one low-budget reflect synthesis (falls back to pages, then recall, on timeout/5xx)
    *    "pages"   — the knowledge pages matching the prompt by search (retrieval only, no LLM)
    *    "recall"  — the bank's memories recalled for the prompt (`recallOptions`; no LLM)
@@ -156,13 +128,12 @@ export interface RawConfig {
   pageRefreshEveryTurns?: number; // knowledge-page refresh cadence in user turns (default 1; 0 also means 1)
   /** What it COSTS to keep this project's knowledge pages current — the trigger stamped on every
    *  page this plugin creates (the seeded taxonomy and each captured initiative):
-   *    "cron" (default)         — refresh on `pageTriggerCron` only, and only when actually stale
+   *    "manual" (default)       — never refresh on its own; the tools and control plane still can
+   *    "cron"                   — refresh on `pageTriggerCron` only, and only when actually stale
    *    "auto-refresh"           — refresh after every consolidation that produced new material
-   *    "manual"                 — never refresh on its own; the tools and control plane still can
    *  Auto-refresh is both the most current and the most expensive: one LLM synthesis per page per
-   *  consolidation, which adds up fast across auto-surveyed repos (#3506) — hence the hourly
-   *  staggered schedule as the default. Existing pages keep the trigger they were created with —
-   *  this changes what NEW pages get. */
+   *  consolidation (#3506). Naming a `pageTriggerCron` without a type selects "cron". Existing pages
+   *  keep the trigger they were created with — this changes what NEW pages get. */
   pageTriggerType?: "auto-refresh" | "cron" | "manual";
   /** Schedule for `pageTriggerType: "cron"` — UTC, standard 5-field cron, e.g. "0 3 * * *".
    *  Defaults to DEFAULT_PAGE_TRIGGER_CRON ("H * * * *": hourly, on each page's own minute).
@@ -206,24 +177,17 @@ export interface RawConfig {
   customPages?: CustomPagesConfig;
   autoSeed?: boolean; // SessionStart: auto-seed a cold repo's bank from git history (default true)
   seedLimit?: number; // git-log document: keeps between seedLimit/2 and seedLimit newest commits (default 300)
-  codebaseSurvey?: boolean; // SessionStart: spawn a headless claude to survey a cold repo's structure (default true)
+  codebaseSurvey?: boolean; // SessionStart: spawn a headless agent CLI to survey a cold repo's structure, on whatever model that CLI uses (default false)
   surveyModel?: string; // model passed to the headless survey's `claude -p --model` (default "haiku")
   surveyBudgetUsd?: number; // spend cap passed to the headless survey's `claude -p --max-budget-usd` (default 2)
   /** Plugin log verbosity ("debug" | "info" | "warn" | "error", default "info");
    *  HINDSIGHT_LOG_LEVEL overrides for ad-hoc debugging. */
   logLevel?: "debug" | "info" | "warn" | "error";
-  /** Keep the installed runtime current by itself (default true). Once a day a session start asks
-   *  npm for the published version and, when it is newer, re-stages ~/.hindsight/coding-agents in
-   *  the background — the copy every wired agent's hooks already point at. It rewires no host
-   *  config, so a release that adds a NEW hook entry point still needs a manual `install`.
-   *  Set false to pin the installed version (air-gapped machines, or a deliberate downgrade);
-   *  updating is then `npx @vectorize-io/hindsight-coding-agents install` again, as before. */
-  autoUpdate?: boolean;
   surveyRefreshCommits?: number; // re-run the survey at SessionStart once this many commits have accrued since the last one, so structural pages track an evolving architecture (default 20; 0 = cold-seed only)
   /** How git history feeds memory — seeding AND keeping current use the same engine:
    *  "message" = commit messages only (cheap aggregated doc, re-upserted when HEAD moves);
    *  "full"    = messages + every recent commit's full diff (progressive batches, newest first);
-   *  "none"    = git ingestion off entirely. Default "message" (cheap by default; opt into depth). */
+   *  "none"    = git ingestion off entirely (the default; opt into depth). */
   gitIngest?: "message" | "full" | "none";
   /** Extra tags stamped on every session write-back, e.g. ["project:{gitProject}", "env:work"].
    *  Placeholders: {gitProject} {project} {harness} {bankId} {sessionId} {timestamp} {channel}
@@ -302,17 +266,9 @@ export interface RawConfig {
 
 /** Fully-resolved config: every field present. */
 export interface Config {
-  serverMode: "cloud" | "self-hosted" | "daemon";
-  /** The EFFECTIVE base URL. In daemon mode this is already 127.0.0.1:{apiPort}, so every caller
-   *  that builds a client keeps working without knowing which mode is active. */
+  /** The server's base URL, "" when no usable one is configured (see `requireEndpoint`). */
   apiUrl: string;
   apiToken?: string;
-  apiPort: number;
-  /** Undefined = never told the daemon to auto-exit; see RawConfig above. */
-  daemonIdleTimeout?: number;
-  daemonProfile: string;
-  embedVersion?: string;
-  embedPackagePath?: string;
   bankId?: string; // resolved per-directory via deriveBankIdOrSkip — see core/bank.ts
   dynamicBankId?: boolean;
   bankIdTemplate?: string;
@@ -354,15 +310,14 @@ export interface Config {
   banks: Record<string, Omit<RawConfig, "banks" | "harnesses"> & { bank?: string }>;
   paths: Record<string, Omit<RawConfig, "banks" | "harnesses" | "paths">>;
   logLevel: "debug" | "info" | "warn" | "error";
-  autoUpdate: boolean;
 }
 
 /**
  * The page-refresh trigger a raw config asks for: the schedule kind, and the expression it fires on.
  *
- * `"cron"` is the default and needs no `pageTriggerCron`: an omitted expression takes
- * DEFAULT_PAGE_TRIGGER_CRON, so the common config — none of these fields at all — is an hourly
- * staggered refresh. A user who wants pages to stop refreshing on their own writes "manual".
+ * `"manual"` is the default: nothing refreshes on its own unless it was asked to. `"cron"` needs no
+ * `pageTriggerCron` (an omitted expression takes DEFAULT_PAGE_TRIGGER_CRON), and naming an expression
+ * without a type asks for that schedule.
  *
  * A malformed `H` is refused here and not one step later: `expandCronHash` leaves an expression it
  * cannot read alone, so an unchecked `"H(9-3) * * * *"` would reach the server verbatim and fail
@@ -377,13 +332,18 @@ function resolvePageTrigger(raw: RawConfig): {
 } {
   if (raw.pageTriggerType === "manual") return { type: "manual" };
   if (raw.pageTriggerType === "auto-refresh") return { type: "auto-refresh" };
-  if (raw.pageTriggerType !== undefined && raw.pageTriggerType !== "cron")
-    log.warn(
-      "config",
-      `ignoring pageTriggerType=${JSON.stringify(raw.pageTriggerType)} — ` +
-        "expected cron|auto-refresh|manual"
-    );
   const cron = raw.pageTriggerCron?.trim();
+  if (raw.pageTriggerType !== "cron") {
+    if (raw.pageTriggerType !== undefined) {
+      log.warn(
+        "config",
+        `ignoring pageTriggerType=${JSON.stringify(raw.pageTriggerType)} — ` +
+          "expected cron|auto-refresh|manual"
+      );
+      return { type: "manual" };
+    }
+    if (!cron) return { type: "manual" };
+  }
   if (!cron) return { type: "cron", cron: DEFAULT_PAGE_TRIGGER_CRON };
   if (!isHashedCron(cron) || parseHashedCron(cron)) return { type: "cron", cron };
   log.warn(
@@ -576,43 +536,58 @@ function resolveDefaultBankConfig(raw: RawConfig["defaultBankConfig"]): Record<s
 export type AutoInject = "reflect" | "pages" | "recall" | "none";
 const AUTO_INJECT_MODES: readonly AutoInject[] = ["reflect", "pages", "recall", "none"];
 
-/** `autoInject` wins; otherwise the deprecated `autoReflect: false` means "none". */
+/** `autoInject` wins; otherwise the deprecated `autoReflect` picks, and "recall" is the default. */
 function resolveAutoInject(raw: RawConfig): AutoInject {
   if (raw.autoReflect !== undefined) {
     const replacement = raw.autoReflect === false ? "none" : "reflect";
     log.warn("config", `autoReflect is deprecated — use autoInject: "${replacement}" instead`);
   }
   if (AUTO_INJECT_MODES.includes(raw.autoInject as AutoInject)) return raw.autoInject as AutoInject;
+  if (raw.autoReflect === undefined) return "recall";
   return raw.autoReflect === false ? "none" : "reflect";
 }
 
+/** Whether a URL is on the vendor's hosted domain, which this build never talks to. */
+function isVendorHosted(url: URL): boolean {
+  return /(^|\.)vectorize\.io\.?$/i.test(url.hostname);
+}
+
+/**
+ * A URL we may send to, or "". There is no fallback host: anything that is not an http(s) URL, and
+ * the vendor's hosted service however it is spelled, resolves to no server at all, so a mistake
+ * leaves the plugin inert rather than sending transcripts off this network.
+ */
+export function usableApiUrl(url: unknown): string {
+  if (typeof url !== "string") return "";
+  try {
+    const parsed = new URL(url.trim());
+    if (!["http:", "https:"].includes(parsed.protocol)) return "";
+    if (!isVendorHosted(parsed)) return url.trim();
+    log.warn("config", `refusing ${parsed.hostname}: this build talks only to servers you run`);
+  } catch {
+    /* not a URL */
+  }
+  return "";
+}
+
+/** The server a raw config names, or "". A retired `serverMode` ("cloud", "daemon") names none. */
+function configuredApiUrl(raw: RawConfig): string {
+  const mode: unknown = raw.serverMode;
+  return mode === undefined || mode === "self-hosted" ? usableApiUrl(raw.apiUrl) : "";
+}
+
 export function resolveConfig(raw: RawConfig = {}): Config {
-  const serverMode = ["cloud", "self-hosted", "daemon"].includes(raw.serverMode as string)
-    ? (raw.serverMode as "cloud" | "self-hosted" | "daemon")
-    : "cloud";
-  const apiPort = raw.apiPort || DEFAULT_DAEMON_PORT;
   const pageTrigger = resolvePageTrigger(raw);
   return {
-    serverMode,
-    // Daemon mode resolves the URL HERE rather than at each call site: every entry point already
-    // builds its client from cfg.apiUrl, so collapsing the mode into that one field means the
-    // daemon needs no plumbing through eight separate constructors.
-    apiUrl:
-      serverMode === "daemon"
-        ? `http://127.0.0.1:${apiPort}`
-        : (raw.apiUrl ?? "https://api.hindsight.vectorize.io"),
+    apiUrl: configuredApiUrl(raw),
     apiToken: raw.apiToken || undefined,
-    apiPort,
-    daemonIdleTimeout: raw.daemonIdleTimeout,
-    daemonProfile: raw.daemonProfile || DEFAULT_DAEMON_PROFILE,
-    embedVersion: raw.embedVersion || undefined,
-    embedPackagePath: raw.embedPackagePath || undefined,
     bankId: raw.bankId,
     dynamicBankId: raw.dynamicBankId,
     bankIdTemplate: raw.bankIdTemplate,
     mapPathToBank: raw.mapPathToBank,
     resolveWorktrees: raw.resolveWorktrees,
-    optInOnly: raw.optInOnly ?? false,
+    // Only a literal false opts out: a privacy switch must not be turned off by a typo.
+    optInOnly: raw.optInOnly !== false,
     // Same shape as retainTags: a config typo must not become a path that silently approves nothing.
     optInPaths: Array.isArray(raw.optInPaths)
       ? raw.optInPaths.filter((p): p is string => typeof p === "string" && p.trim() !== "")
@@ -660,13 +635,13 @@ export function resolveConfig(raw: RawConfig = {}): Config {
     customPages: resolveCustomPages(raw.customPages),
     autoSeed: raw.autoSeed ?? true,
     seedLimit: raw.seedLimit || DEFAULT_SEED_LIMIT,
-    codebaseSurvey: raw.codebaseSurvey ?? true,
+    codebaseSurvey: raw.codebaseSurvey ?? false,
     surveyModel: raw.surveyModel || "haiku",
     surveyBudgetUsd: raw.surveyBudgetUsd || 2,
     surveyRefreshCommits: raw.surveyRefreshCommits ?? 20,
     gitIngest: ["message", "full", "none"].includes(raw.gitIngest as string)
       ? (raw.gitIngest as "message" | "full" | "none")
-      : "message",
+      : "none",
     // Hostile input is a config typo, not an attack: keep only string entries so a stray number or
     // nested object cannot reach the API as a tag and fail the whole retain.
     retainTags: Array.isArray(raw.retainTags)
@@ -690,19 +665,34 @@ export function resolveConfig(raw: RawConfig = {}): Config {
     logLevel: ["debug", "info", "warn", "error"].includes(raw.logLevel as string)
       ? (raw.logLevel as "debug" | "info" | "warn" | "error")
       : "info",
-    autoUpdate: raw.autoUpdate ?? true,
   };
 }
 
+/**
+ * No server, no memory. Rides the `disabled` gate every entry point already checks, so a config
+ * without a usable URL stops each hook and tool before anything is built or sent.
+ */
+function requireEndpoint(cfg: Config): Config {
+  return cfg.apiUrl ? cfg : { ...cfg, disabled: true };
+}
+
+/**
+ * The config file's layer. A missing file contributes nothing, which leaves the env layer in charge.
+ * An unusable one switches memory off instead of being skipped: it is a file that was meant to say
+ * something, possibly `disabled` or a narrower `optInPaths`, and we cannot tell what.
+ */
 function readRaw(path: string): RawConfig {
   try {
-    return JSON.parse(readFileSync(path, "utf8")) as RawConfig;
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as RawConfig;
+    console.error(`hindsight: memory is off, the config at ${path} is not a JSON object`);
   } catch (e) {
-    if ((e as NodeJS.ErrnoException)?.code !== "ENOENT") {
-      console.error(`hindsight: ignoring invalid config at ${path}: ${(e as Error)?.message || e}`);
-    }
-    return {};
+    if ((e as NodeJS.ErrnoException)?.code === "ENOENT") return {};
+    console.error(
+      `hindsight: memory is off, invalid config at ${path}: ${(e as Error)?.message || e}`
+    );
   }
+  return { disabled: true };
 }
 
 /** Shallow-merge b over a; `harnesses` never survives into a layer; `banks` merges by bank id and
@@ -756,13 +746,6 @@ const ENV_KEYS = {
   serverMode: "HINDSIGHT_SERVER_MODE",
   apiUrl: "HINDSIGHT_API_URL",
   apiToken: "HINDSIGHT_API_TOKEN",
-  // These four keep the names the old per-agent Claude Code plugin used, so a user migrating from
-  // it can carry their existing environment over unchanged.
-  apiPort: "HINDSIGHT_API_PORT",
-  daemonIdleTimeout: "HINDSIGHT_DAEMON_IDLE_TIMEOUT",
-  embedVersion: "HINDSIGHT_EMBED_VERSION",
-  embedPackagePath: "HINDSIGHT_EMBED_PACKAGE_PATH",
-  daemonProfile: "HINDSIGHT_DAEMON_PROFILE",
   bankId: "HINDSIGHT_BANK_ID",
   dynamicBankId: "HINDSIGHT_DYNAMIC_BANK_ID",
   bankIdTemplate: "HINDSIGHT_BANK_ID_TEMPLATE",
@@ -791,7 +774,6 @@ const ENV_KEYS = {
   surveyBudgetUsd: "HINDSIGHT_SURVEY_BUDGET_USD",
   surveyRefreshCommits: "HINDSIGHT_SURVEY_REFRESH_COMMITS",
   logLevel: "HINDSIGHT_LOG_LEVEL",
-  autoUpdate: "HINDSIGHT_AUTO_UPDATE",
   gitIngest: "HINDSIGHT_GIT_INGEST",
   // Scalar modes only ("shared", "combined", "per_tag", "all_combinations"). An explicit scope
   // list is a list OF lists, which does not survive flattening into one variable — file-only.
@@ -813,13 +795,10 @@ const ENV_BOOLEANS = new Set<keyof RawConfig>([
   "autoReflect",
   "autoSeed",
   "codebaseSurvey",
-  "autoUpdate",
   "manageBankConfig",
 ]);
 const ENV_LISTS = new Set<keyof RawConfig>(["retainTags", "optInPaths"]);
 const ENV_NUMBERS = new Set<keyof RawConfig>([
-  "apiPort",
-  "daemonIdleTimeout",
   "maxParallelRetains",
   "reflectTimeoutMs",
   "reflectToolTimeoutMs",
@@ -842,7 +821,11 @@ export function readEnvConfig(env: NodeJS.ProcessEnv = process.env): RawConfig {
     const value = env[name];
     if (value === undefined || value.trim() === "") continue;
     if (ENV_BOOLEANS.has(key)) {
-      out[key] = ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+      const flag = value.trim().toLowerCase();
+      if (["1", "true", "yes", "on"].includes(flag)) out[key] = true;
+      else if (["0", "false", "no", "off"].includes(flag)) out[key] = false;
+      // Left unset, not false: a typo in HINDSIGHT_OPT_IN_ONLY must not opt every project in.
+      else console.error(`hindsight: ignoring ${name}=${value} — not a boolean`);
     } else if (ENV_LISTS.has(key)) {
       // Empty entries dropped, so a trailing comma or "a,,b" is a typo rather than an empty tag.
       const items = value
@@ -861,7 +844,8 @@ export function readEnvConfig(env: NodeJS.ProcessEnv = process.env): RawConfig {
   return out as RawConfig;
 }
 
-/** Load + resolve config from THE config file, with env as a fallback. Missing file -> defaults. */
+/** Load + resolve config from THE config file, with env as a fallback. Missing file -> defaults,
+ *  which name no server, so memory stays off until a file or HINDSIGHT_API_URL supplies one. */
 export function loadConfig(opts: LoadOptions | string = {}): Config {
   const o: LoadOptions = typeof opts === "string" ? { path: opts } : opts; // legacy: loadConfig(path)
   // Env first so the FILE wins on any field it sets.
@@ -871,7 +855,7 @@ export function loadConfig(opts: LoadOptions | string = {}): Config {
   // "opencode", whose silent default misfiled every other harness's background seed into an
   // `opencode::<project>` bank (#3247). An explicit `harness:` in the config file still wins.
   if (!raw.harness && o.harness) raw.harness = o.harness;
-  return resolveConfig(raw);
+  return requireEndpoint(resolveConfig(raw));
 }
 
 /** Bank-resolution fields are meaningless inside a `banks.<id>` section (they can't change the id
@@ -913,13 +897,13 @@ export function applyBankConfig(
     cfg = { ...cfg, ...resolvePartial(cfg, rest as RawConfig) };
   }
   const section = cfg.banks[resolvedId];
-  if (!section) return { cfg, bankId: resolvedId };
+  if (!section) return { cfg: requireEndpoint(cfg), bankId: resolvedId };
   const safe = overrideFields(section);
   // `bank` renames the destination — single hop, selected by the ORIGINAL resolved id (the
   // target's own banks section, if any, is deliberately NOT consulted: no chaining).
   const bankId = typeof safe.bank === "string" && safe.bank ? (safe.bank as string) : resolvedId;
   delete safe.bank;
-  return { cfg: { ...cfg, ...resolvePartial(cfg, safe as RawConfig) }, bankId };
+  return { cfg: requireEndpoint({ ...cfg, ...resolvePartial(cfg, safe as RawConfig) }), bankId };
 }
 
 /** An override section minus what it may not set: the resolution/approval fields and the nested
@@ -943,18 +927,13 @@ function resolvePartial(cfg: Config, patch: RawConfig): Partial<Config> {
   }
   // The legacy key resolves into a differently-named field, so the loop above can't carry it.
   if ("autoReflect" in patch && !("autoInject" in patch)) out.autoInject = full.autoInject;
-  // `apiUrl` is derived from `serverMode` + `apiPort`, so an override naming any of the three
-  // re-derives all three against the current cfg: `{ serverMode: "daemon" }` alone must also move
-  // the URL to the local daemon, and `{ apiUrl }` under a global daemon mode stays ignored.
-  if ("serverMode" in patch || "apiUrl" in patch || "apiPort" in patch) {
-    const conn = resolveConfig({
-      serverMode: patch.serverMode ?? cfg.serverMode,
-      apiPort: patch.apiPort ?? cfg.apiPort,
-      apiUrl: patch.apiUrl ?? (cfg.serverMode === "daemon" ? undefined : cfg.apiUrl),
+  // `apiUrl` depends on `serverMode`, so an override naming either re-derives it: a section still
+  // saying "cloud" or "daemon" must not keep the URL it inherited.
+  if ("serverMode" in patch || "apiUrl" in patch) {
+    out.apiUrl = configuredApiUrl({
+      serverMode: patch.serverMode,
+      apiUrl: patch.apiUrl ?? cfg.apiUrl,
     });
-    out.serverMode = conn.serverMode;
-    out.apiUrl = conn.apiUrl;
-    out.apiPort = conn.apiPort;
   }
   return out;
 }

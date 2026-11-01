@@ -3,17 +3,12 @@ import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveConfig } from "./config";
+import { type RawConfig, resolveConfig as resolveDefaults } from "./config";
 import type { HindsightClient } from "./hindsight";
 import { RuntimeCore } from "./runtime";
 
-// The real ensureDaemon shells out (uvx/cargo probes) and spawns a detached process; only WHERE it
-// is called from is under test here — the deciding itself is covered in daemon.test.ts.
-const daemonSpy = vi.hoisted(() => vi.fn(async () => {}));
-vi.mock("./daemon", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./daemon")>()),
-  ensureDaemon: daemonSpy,
-}));
+/** This suite covers the reflect path, which is opt-in. */
+const resolveConfig = (raw: RawConfig = {}) => resolveDefaults({ autoInject: "reflect", ...raw });
 
 // Whether a bank is new enough to defer is session-start's call (session-start.test.ts); here only
 // the hand-off of that decision to the first session is under test, so it can be forced.
@@ -245,54 +240,6 @@ describe("RuntimeCore session-idle write-back", () => {
     });
     await expect(runtime.onSessionIdle("s5")).resolves.toBeUndefined();
     expect(retained).toHaveLength(0);
-  });
-});
-
-/**
- * Daemon parity with the hook harnesses (#3524).
- *
- * A persistent-plugin host runs no hook binaries, so `runSessionStartHook`/`runRetainHook` — where
- * the hook harnesses ensure the daemon — never execute for it. dsh in daemon mode therefore never
- * started one: every `hindsight_*` call failed with ECONNREFUSED until the user ran daemon-start.js
- * by hand, and again after each idle-out. RuntimeCore is the one place all five plugin hosts
- * (opencode, Kilo, Cline, Prime Agent, dsh) share, so the two ensure points live here.
- */
-describe("RuntimeCore daemon lifecycle", () => {
-  const daemonCfg = resolveConfig({ serverMode: "daemon" });
-  const client = {
-    listDocumentIds: vi.fn(async () => new Set<string>()),
-    listPages: vi.fn(async () => ({ items: [] })),
-    retain: vi.fn(async () => {}),
-  } as unknown as HindsightClient;
-
-  beforeEach(() => daemonSpy.mockClear());
-
-  it("starts the daemon at seedIfCold — the plugin hosts' SessionStart", async () => {
-    const core = new RuntimeCore(client, "bank-1", daemonCfg, "dsh", "/repos/one");
-    await core.seedIfCold("/repos/one");
-    expect(daemonSpy).toHaveBeenCalledWith(daemonCfg, "dsh", { waitMs: 12_000 });
-  });
-
-  // A daemon that is gone by write-back time — crashed, or stopped by the user between turns —
-  // would lose the whole exchange with no second chance to start one.
-  it("starts the daemon again on write-back — the Stop hook these hosts don't have", async () => {
-    const core = new RuntimeCore(client, "bank-1", daemonCfg, "dsh", "/repos/one");
-    core.setTranscriptSource(async () => [{ role: "user", content: "hi" }] as never);
-    await core.onSessionIdle("s1");
-    await new Promise((r) => setTimeout(r, 0)); // retain is fire-and-forget
-    expect(daemonSpy).toHaveBeenCalledWith(daemonCfg, "dsh", { waitMs: 40_000 });
-    expect(client.retain).toHaveBeenCalled();
-  });
-
-  // Waiting inside the fire-and-forget chain is the point: the host's stop handler awaits
-  // onSessionIdle, and a 40s block there would freeze the UI on a cold daemon.
-  it("never makes the host wait for the daemon on the write path", async () => {
-    let released = () => {};
-    daemonSpy.mockImplementationOnce(() => new Promise<void>((r) => (released = r)));
-    const core = new RuntimeCore(client, "bank-1", daemonCfg, "dsh", "/repos/one");
-    core.setTranscriptSource(async () => [{ role: "user", content: "hi" }] as never);
-    await expect(core.onSessionIdle("s2")).resolves.toBeUndefined();
-    released();
   });
 });
 

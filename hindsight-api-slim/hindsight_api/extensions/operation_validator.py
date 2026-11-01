@@ -942,14 +942,13 @@ class OperationValidatorExtension(Extension, ABC):
         Called after a file is converted to markdown (before the retain step).
 
         Override to implement post-conversion logic such as:
-        - Billing for premium parsers (e.g., Iris)
         - Usage tracking
         - Audit logging
 
         Args:
             result: Result context containing:
                 - bank_id: Bank identifier
-                - parser_name: Name of the parser used (e.g., 'markitdown', 'iris')
+                - parser_name: Name of the parser used (e.g., 'markitdown')
                 - filename: Original filename
                 - output_chars: Character count of the converted markdown
                 - request_context: Request context with auth info

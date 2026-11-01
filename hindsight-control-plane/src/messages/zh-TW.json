@@ -622,15 +622,6 @@
     "memoryDefenseAction_block": "阻擋",
     "memoryDefenseSecretLeakTitle": "密鑰外洩防護",
     "memoryDefenseSecretLeakDescription": "掃描保留內容中的密鑰。45 種模式涵蓋常見供應商金鑰、AWS 與個人資訊。",
-    "memoryDefenseEnterpriseTitle": "Memory Defense Enterprise",
-    "memoryDefenseEnterpriseSubtitle": "偵測更多、智能編輯、全面稽核 — Hindsight Cloud 提供。",
-    "memoryDefenseEnterpriseFeatureDetectSecrets": "進階密鑰偵測:200+ 種樣式,涵蓋供應商金鑰、AWS、GitHub 與 CI 權杖",
-    "memoryDefenseEnterpriseFeatureBase64": "Base64 解碼:擷取編碼負載中隱藏的密鑰",
-    "memoryDefenseEnterpriseFeatureLlm": "LLM 篩查:擷取正則表達式無法識別的新型外洩模式",
-    "memoryDefenseEnterpriseFeaturePromptInjection": "提示詞注入偵測:阻止覆寫代理行為的嘗試",
-    "memoryDefenseEnterpriseFeatureSizeAnomaly": "大小異常:拒絕可疑的過大負載",
-    "memoryDefenseEnterpriseFeatureProtectedKeys": "受保護的標籤命名空間:強制使用不可變的身份標籤",
-    "memoryDefenseEnterpriseCta": "申請示範",
     "recallTitle": "召回",
     "recallDescription": "此記憶庫召回時執行的檢索階段，以及結果如何去重",
     "recallServerDefault": "伺服器預設值",
@@ -1923,7 +1914,7 @@
     "resumeMotionLabel": "繼續"
   },
   "metadata": {
-    "title": "Hindsight Cloud",
+    "title": "Hindsight",
     "description": "Hindsight 語義記憶的多租戶控制面板"
   },
   "addDocument": {
@@ -1940,8 +1931,6 @@
     "extractionMethodLabel": "擷取方法",
     "parserStandardLabel": "標準",
     "parserStandardDescription": "免費 — 適用於文字型文件；圖片 OCR 取決於伺服器設定",
-    "parserEnhancedLabel": "增強（Iris）",
-    "parserEnhancedDescription": "額外收費 — 對複雜排版、掃描文件和圖片效果更佳",
     "contextLabel": "脈絡",
     "contextPlaceholder": "關於此文件的選填脈絡…",
     "eventDateLabel": "事件日期",
@@ -1959,8 +1948,6 @@
     "toastDocumentAddedDescription": "文件已新增，正在擷取記憶。",
     "toastFilesSkipped": "部分檔案已跳過",
     "toastFilesSkippedDescription": "僅允許受支援的檔案型別（PDF、Word、PowerPoint、Excel、圖片及文字檔案）。",
-    "toastImagesRequireIris": "圖片需要增強（Iris）擷取",
-    "toastImagesRequireIrisDescription": "切換到增強擷取以上傳：{names}",
     "toastUploadingSingle": "上傳中 {name}...",
     "toastUploadingMultiple": "上傳中 {count} 個檔案...",
     "toastFileUploaded": "檔案已上傳",

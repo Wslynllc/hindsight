@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Union
 from json_repair import repair_json
 from pydantic import BaseModel
 
+from .. import local_only
 from .._cross_loop import CrossLoopSemaphore
 from .response_models import LLMCallResult
 
@@ -550,6 +551,7 @@ def create_llm_provider(
     from . import providers
 
     provider_lower = provider.lower()
+    local_only.check_llm(provider_lower, base_url)
     if provider_lower == "gemini":
         from ..config import parse_gemini_service_tier
 

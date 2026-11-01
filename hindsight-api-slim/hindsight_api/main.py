@@ -25,7 +25,7 @@ from typing import Any
 
 import uvicorn
 
-from . import __version__
+from . import __version__, local_only
 from .banner import print_banner
 from .config import (
     DEFAULT_ACCESS_LOG,
@@ -292,6 +292,8 @@ def main():
 
     parsed_cli_args = _parse_cli_args(sys.argv[1:], config)
     args = parsed_cli_args.args
+
+    local_only.check_config(config)
 
     # Daemon mode handling.
     # is_daemon_child is True when we are the re-exec'd child spawned by

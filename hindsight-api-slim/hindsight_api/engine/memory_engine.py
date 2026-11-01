@@ -35,6 +35,7 @@ import asyncpg
 import numpy as np
 from pydantic import TypeAdapter, ValidationError
 
+from .. import local_only
 from .._vector_index import (
     ann_search_tuning_settings,
     configured_vector_extension,
@@ -2943,6 +2944,7 @@ class MemoryEngine(MemoryEngineInterface):
 
         # Apply defaults from config
         db_url = db_url or config.database_url
+        local_only.check_databases(_get_raw_config(), db_url)
         memory_llm_provider = memory_llm_provider or config.llm_provider
 
         # Force skip LLM verification when provider is "none" (no LLM to verify)
@@ -4558,7 +4560,7 @@ class MemoryEngine(MemoryEngineInterface):
             f"document_id={document_id}, {len(markdown_content)} chars. Submitting retain task."
         )
 
-        # Fire file conversion hook (e.g., for Iris billing)
+        # Fire file conversion hook
         if self._operation_validator:
             try:
                 from hindsight_api.models import RequestContext
@@ -6463,7 +6465,7 @@ class MemoryEngine(MemoryEngineInterface):
         logger.debug(f"File storage initialized ({config.file_storage_type})")
 
         # Initialize parser registry
-        from .parsers import FileParserRegistry, IrisParser, LlamaParseParser, MarkitdownParser
+        from .parsers import FileParserRegistry, LlamaParseParser, MarkitdownParser
 
         self._parser_registry = FileParserRegistry()
         try:
@@ -6480,15 +6482,9 @@ class MemoryEngine(MemoryEngineInterface):
             logger.debug("Registered markitdown parser")
         except ImportError:
             logger.warning("markitdown not available - file parsing disabled")
-        iris_token = config.file_parser_iris_token
-        iris_org_id = config.file_parser_iris_org_id
-        if iris_token and iris_org_id:
-            self._parser_registry.register(IrisParser(token=iris_token, org_id=iris_org_id))
-            logger.debug("Registered iris parser")
-        else:
-            logger.debug("Iris parser not registered (VECTORIZE_TOKEN or VECTORIZE_ORG_ID not set)")
         llama_parse_key = config.file_parser_llama_parse_api_key
         if llama_parse_key:
+            local_only.check_file_parser("llama_parse")
             self._parser_registry.register(LlamaParseParser(api_key=llama_parse_key))
             logger.debug("Registered llama_parse parser")
         else:

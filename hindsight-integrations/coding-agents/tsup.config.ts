@@ -67,8 +67,6 @@ export default defineConfig({
     "droid-hook": "src/droid-hook.ts",
     "droid-sessionstart-hook": "src/droid-sessionstart-hook.ts",
     "droid-stop-hook": "src/droid-stop-hook.ts",
-    // Spawned DETACHED to start the local daemon — a cold start outlives every hook timeout.
-    "daemon-start": "src/daemon-start.ts",
     // Spawned DETACHED to hold the codebase-survey lease for the survey agent's lifetime.
     "survey-supervisor": "src/survey-supervisor.ts",
     "mcp-server": "src/mcp-server.ts",
@@ -87,16 +85,12 @@ export default defineConfig({
   // mcp-server.js additionally needs its npm deps (the MCP SDK + zod) inlined, since the wrapper
   // only copies the single bundle file, not node_modules. The regexes catch subpath imports too
   // (e.g. "@modelcontextprotocol/sdk/server/mcp.js", "zod/v4/...").
-  // hindsight-all (the local-daemon lifecycle manager) is inlined for the same reason: hooks are
-  // wired by absolute path to ONE dist file and never load the package's node_modules. It has zero
-  // dependencies of its own, so inlining costs almost nothing.
   // jsonc-parser likewise: installer.js is staged to ~/.hindsight/coding-agents as dist + skill +
   // package.json — never node_modules — so an external import there is unresolvable, and re-running
   // `install` from the staged copy (the upgrade path) dies with ERR_MODULE_NOT_FOUND.
   noExternal: [
     /^@modelcontextprotocol\/sdk/,
     /^zod/,
-    /^@vectorize-io\/hindsight-all/,
     /^jsonc-parser/,
     // smol-toml likewise: installer.js parses ~/.grok/config.toml with it.
     /^smol-toml/,

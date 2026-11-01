@@ -7,7 +7,7 @@ import { EventEmitter } from "node:events";
 import { buildSessionStartContext, runSessionStartHook } from "./session-start";
 import { startCodebaseSurvey, SURVEY_MAX_ATTEMPTS } from "./survey";
 import { releaseLease, SURVEY_SPEC_ENV } from "./survey-lease";
-import { resolveConfig } from "./config";
+import { resolveConfig as resolveDefaults } from "./config";
 import { repoNameOf } from "./git";
 import { HOOK_HARNESSES } from "../harness/hook-lifecycle";
 import type { RawConfig } from "./config";
@@ -30,14 +30,38 @@ vi.mock("./config", async (importOriginal) => {
   return {
     ...actual,
     loadConfig: (...a: Parameters<typeof actual.loadConfig>) =>
-      rawConfig ? actual.resolveConfig(rawConfig) : actual.loadConfig(...a),
+      rawConfig
+        ? actual.resolveConfig({ apiUrl: "http://server.test", optInOnly: false, ...rawConfig })
+        : actual.loadConfig(...a),
   };
 });
+
+/** Most of this suite is about what git ingest and the survey do once someone turns them on. */
+const resolveConfig = (raw: RawConfig = {}) =>
+  resolveDefaults({ codebaseSurvey: true, gitIngest: "message", ...raw });
 
 /** Default roster the mock client returns; asserted on by name below. */
 const listPagesOk = async () => ({ items: [{ id: "p1", name: "Component map" }] });
 
 describe("buildSessionStartContext", () => {
+  it("out of the box a cold repo starts no survey, so no agent CLI reaches a hosted model", async () => {
+    const startSurvey = vi.fn(async () => true);
+    const retain = vi.fn(async () => {});
+    const out = await buildSessionStartContext({
+      cwd: "/repo",
+      bankId: "b",
+      cfg: resolveDefaults({ apiUrl: "http://server.test" }),
+      client: { listDocumentIds: async () => new Set<string>(), listPages: listPagesOk, retain },
+      hasGit: () => true,
+      startSeed: vi.fn(),
+      startSurvey,
+      headSha: () => "abc123",
+    });
+    expect(startSurvey).not.toHaveBeenCalled();
+    expect(retain).not.toHaveBeenCalled(); // no survey baseline either
+    expect(out.systemMessage).not.toContain("is learning this repo");
+  });
+
   it("warns in the user-visible banner when the old Claude Code plugin is still active", async () => {
     const client = { listDocumentIds: async () => new Set(["git:a"]), listPages: listPagesOk };
     const detectLegacyPlugin = vi.fn().mockReturnValue("hindsight-memory@hindsight");
@@ -462,7 +486,7 @@ describe("runSessionStartHook anti-recursion guard", () => {
 describe("runSessionStartHook host MCP registration", () => {
   let repo: string;
   const run = async (cfg: RawConfig) => {
-    rawConfig = { autoSeed: false, autoUpdate: false, ...cfg };
+    rawConfig = { autoSeed: false, ...cfg };
     stdin = JSON.stringify({ cwd: repo, session_id: `sess-${repo.split("/").pop()}` });
     const ensureMcpRegistration = vi.fn(() => "enable workspace MCP");
     const write = vi.spyOn(process.stdout, "write").mockReturnValue(true);
@@ -718,6 +742,7 @@ describe("buildSessionStartContext — survey attempt limit (#5623)", () => {
   // this hook makes — so the count must hold with every retain failing.
   it("stops surveying a commit after SURVEY_MAX_ATTEMPTS launches, with every retain failing", async () => {
     const leaseDir = mkdtempSync(join(tmpdir(), "hindsight-attempts-"));
+    rawConfig = {}; // the survey resolves its own config, and needs a live one to launch at all
     try {
       const spawn = vi.fn().mockImplementation(() => {
         const child = Object.assign(new EventEmitter(), { unref: vi.fn() });
@@ -760,6 +785,7 @@ describe("buildSessionStartContext — survey attempt limit (#5623)", () => {
       for (let i = 0; i < SURVEY_MAX_ATTEMPTS + 2; i++) await session();
       expect(spawn).toHaveBeenCalledTimes(SURVEY_MAX_ATTEMPTS);
     } finally {
+      rawConfig = undefined;
       rmSync(leaseDir, { recursive: true, force: true });
     }
   });

@@ -10,14 +10,9 @@
 import { readFile, writeFile, mkdir, rename } from "fs/promises";
 import { homedir } from "os";
 import { join, dirname } from "path";
+import { isVendorHosted, VENDOR_HOSTED_REFUSED } from "./vendor-host.js";
 
 export const PLUGIN_ID = "hindsight-openclaw";
-
-/**
- * Default Hindsight Cloud endpoint. Update this when the hosted service URL is
- * finalized, or users can override it at the prompt.
- */
-export const HINDSIGHT_CLOUD_URL = "https://api.hindsight.vectorize.io";
 
 export const DEFAULT_OPENCLAW_CONFIG_PATH = join(homedir(), ".openclaw", "openclaw.json");
 
@@ -45,7 +40,7 @@ export interface OpenClawConfigShape {
   [key: string]: unknown;
 }
 
-export type SetupMode = "cloud" | "api" | "embedded";
+export type SetupMode = "api" | "embedded";
 
 export const NO_KEY_PROVIDERS: ReadonlySet<string> = new Set([
   "claude-code",
@@ -115,7 +110,7 @@ export function envSecretRef(id: string): SecretRef {
   return { source: "env", provider: "default", id };
 }
 
-export function clearCloudFields(pluginConfig: Record<string, unknown>): void {
+export function clearApiFields(pluginConfig: Record<string, unknown>): void {
   delete pluginConfig.hindsightApiUrl;
   delete pluginConfig.hindsightApiToken;
 }
@@ -145,21 +140,11 @@ export function maskSecret(value: string): string {
 }
 
 /**
- * Cloud mode credential: either a direct token value (stored inline as a
- * plaintext string in openclaw.json) or an env var name (stored as a
- * SecretRef that OpenClaw resolves from `process.env` at startup).
- *
- * Interactive wizard defaults to the direct-value form — simpler UX for
- * users pasting a freshly-issued cloud token. CI / production flows should
- * prefer `tokenEnvVar` via `openclaw config set ... --ref-source env` or
- * `--token-env` to keep secrets off disk.
+ * External API credential: either a direct token value (stored inline as a
+ * plaintext string in openclaw.json) or an env var name (stored as a SecretRef
+ * that OpenClaw resolves from `process.env` at startup). CI / production flows
+ * should prefer `tokenEnvVar` to keep secrets off disk.
  */
-export interface CloudSetupInput {
-  apiUrl?: string;
-  token?: string;
-  tokenEnvVar?: string;
-}
-
 export interface ApiSetupInput {
   apiUrl: string;
   token?: string;
@@ -188,31 +173,13 @@ function pickCredential(
 }
 
 /**
- * Apply the Cloud mode to a plugin config in place: sets `hindsightApiUrl` and
- * `hindsightApiToken` (either as a plaintext string or as a SecretRef —
- * whichever the caller provided), strips any leftover local-LLM fields so
- * mode switches don't carry stale state.
- */
-export function applyCloudMode(
-  pluginConfig: Record<string, unknown>,
-  input: CloudSetupInput
-): void {
-  const token = pickCredential(input.token, input.tokenEnvVar);
-  if (token === undefined) {
-    throw new Error("Cloud mode requires either `token` or `tokenEnvVar`");
-  }
-  clearLocalLlmFields(pluginConfig);
-  pluginConfig.hindsightApiUrl = (input.apiUrl ?? HINDSIGHT_CLOUD_URL).trim();
-  pluginConfig.hindsightApiToken = token;
-}
-
-/**
  * Apply the external-API mode to a plugin config in place: sets a required
  * `hindsightApiUrl`, optional `hindsightApiToken` (plaintext or SecretRef),
  * and strips any leftover local-LLM fields so mode switches don't carry
  * stale state.
  */
 export function applyApiMode(pluginConfig: Record<string, unknown>, input: ApiSetupInput): void {
+  if (isVendorHosted(input.apiUrl)) throw new Error(VENDOR_HOSTED_REFUSED);
   const token = pickCredential(input.token, input.tokenEnvVar);
   clearLocalLlmFields(pluginConfig);
   pluginConfig.hindsightApiUrl = input.apiUrl.trim();
@@ -234,7 +201,7 @@ export function applyEmbeddedMode(
   input: EmbeddedSetupInput
 ): void {
   const key = pickCredential(input.apiKey, input.apiKeyEnvVar);
-  clearCloudFields(pluginConfig);
+  clearApiFields(pluginConfig);
   pluginConfig.llmProvider = input.llmProvider;
   if (NO_KEY_PROVIDERS.has(input.llmProvider)) {
     delete pluginConfig.llmApiKey;
@@ -261,11 +228,6 @@ function credentialSuffix(token: string | undefined, tokenEnvVar: string | undef
     return " (token stored inline)";
   }
   return " (no auth)";
-}
-
-export function summarizeCloud(input: CloudSetupInput): string {
-  const url = (input.apiUrl ?? HINDSIGHT_CLOUD_URL).trim();
-  return `Cloud → ${url}${credentialSuffix(input.token, input.tokenEnvVar)}`;
 }
 
 export function summarizeApi(input: ApiSetupInput): string {

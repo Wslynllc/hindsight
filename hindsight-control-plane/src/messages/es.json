@@ -622,15 +622,6 @@
     "memoryDefenseAction_block": "Bloquear",
     "memoryDefenseSecretLeakTitle": "Prevención de fugas de secretos",
     "memoryDefenseSecretLeakDescription": "Analiza el contenido retenido en busca de secretos. 45 patrones que cubren claves comunes de proveedores, AWS e información personal.",
-    "memoryDefenseEnterpriseTitle": "Memory Defense Enterprise",
-    "memoryDefenseEnterpriseSubtitle": "Detecta más, redacta más inteligentemente y audita todo: disponible en Hindsight Cloud.",
-    "memoryDefenseEnterpriseFeatureDetectSecrets": "Detección avanzada de secretos: más de 200 patrones que cubren claves de proveedores, AWS, GitHub y tokens de CI",
-    "memoryDefenseEnterpriseFeatureBase64": "Decodificación Base64: detecta secretos ocultos en cargas útiles codificadas",
-    "memoryDefenseEnterpriseFeatureLlm": "Análisis con LLM: detecta patrones de exfiltración novedosos que las regex no pueden",
-    "memoryDefenseEnterpriseFeaturePromptInjection": "Detección de inyección de prompts: bloquea intentos de anular el comportamiento del agente",
-    "memoryDefenseEnterpriseFeatureSizeAnomaly": "Anomalía de tamaño: rechaza cargas útiles sospechosamente grandes",
-    "memoryDefenseEnterpriseFeatureProtectedKeys": "Espacios de nombres de etiquetas protegidos: aplica etiquetas de identidad inmutables",
-    "memoryDefenseEnterpriseCta": "Solicitar una demo",
     "recallTitle": "Recuperación",
     "recallDescription": "Qué etapas de recuperación se ejecutan durante el recall en este banco y cómo se deduplican los resultados",
     "recallServerDefault": "Valor predeterminado del servidor",
@@ -1923,7 +1914,7 @@
     "resumeMotionLabel": "Reanudar"
   },
   "metadata": {
-    "title": "Hindsight Cloud",
+    "title": "Hindsight",
     "description": "Plano de control multi-inquilino para la memoria semántica de Hindsight"
   },
   "addDocument": {
@@ -1940,8 +1931,6 @@
     "extractionMethodLabel": "Método de extracción",
     "parserStandardLabel": "Estándar",
     "parserStandardDescription": "Gratuito — bueno para documentos basados en texto; el OCR de imágenes depende de la configuración del servidor",
-    "parserEnhancedLabel": "Mejorado (Iris)",
-    "parserEnhancedDescription": "Cargo adicional — mejor calidad para diseños complejos, documentos escaneados e imágenes",
     "contextLabel": "Contexto",
     "contextPlaceholder": "Contexto opcional sobre este documento...",
     "eventDateLabel": "Fecha del evento",
@@ -1959,8 +1948,6 @@
     "toastDocumentAddedDescription": "El documento ha sido agregado y se están extrayendo las memorias.",
     "toastFilesSkipped": "Algunos archivos fueron omitidos",
     "toastFilesSkippedDescription": "Solo se permiten tipos de archivo compatibles (PDF, Word, PowerPoint, Excel, imágenes y archivos de texto).",
-    "toastImagesRequireIris": "Las imágenes requieren extracción Mejorada (Iris)",
-    "toastImagesRequireIrisDescription": "Cambia a extracción Mejorada para subir: {names}",
     "toastUploadingSingle": "Subiendo {name}...",
     "toastUploadingMultiple": "Subiendo {count} archivos...",
     "toastFileUploaded": "Archivo subido",

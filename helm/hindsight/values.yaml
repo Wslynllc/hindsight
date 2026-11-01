@@ -155,13 +155,15 @@ api:
 
   # Environment variables
   env:
-    #HINDSIGHT_API_LLM_PROVIDER: "groq"
-    HINDSIGHT_API_LLM_MODEL: "openai/gpt-oss-120b"
+    # Unset means provider "none": hosted providers and public URLs stop the server at
+    # startup. See FORK.md. The image repositories in this file are upstream's, which do
+    # not carry that enforcement: build this fork and point them at your own registry.
+    #HINDSIGHT_API_LLM_PROVIDER: "ollama"
+    #HINDSIGHT_API_LLM_BASE_URL: "http://10.0.0.5:11434/v1"
 
   # Secret environment variables
   secrets:
     # HINDSIGHT_API_LLM_API_KEY: "your-api-key"
-    # HINDSIGHT_API_LLM_BASE_URL: "https://api.groq.com/openai/v1"
 
 # Worker settings (distributed task processing)
 # When enabled, dedicated worker pods process tasks and the API's internal worker is disabled

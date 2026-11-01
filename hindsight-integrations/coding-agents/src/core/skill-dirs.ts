@@ -20,8 +20,9 @@ import { join } from "node:path";
 
 export const SKILL_DIRS: Record<string, string[]> = {
   "claude-code": [".claude", "skills"],
-  // Codex and dsh share the agentskills-standard root; uninstalling either removes the one copy.
-  codex: [".agents", "skills"],
+  // Codex's own root, not the shared ~/.agents/skills it also scans: that root is read by every
+  // agentskills host on the machine, and Hindsight's skill is not theirs to pick up.
+  codex: [".codex", "skills"],
   dsh: [".agents", "skills"],
   "antigravity-cli": [".gemini", "config", "skills"],
   "cursor-cli": [".cursor", "skills"],
@@ -35,14 +36,14 @@ export const SKILL_DIRS: Record<string, string[]> = {
   // ZCode scans TWO user roots by default (its resolveDefaultSkillRoots): `~/.zcode/skills` and the
   // shared agentskills `~/.agents/skills`. Write its OWN, for the same reason the pi family does —
   // skill removal is by fixed directory name, so installing into the shared root would make
-  // `uninstall zcode` take Codex's and dsh's copy with it.
+  // `uninstall zcode` take dsh's copy with it.
   zcode: [".zcode", "skills"],
   // TraeCode's user-level skills root, resolved per edition by traecodeDotDir below — like ZCode's
   // its own, never the shared agentskills root other hosts install into.
   traecode: [".trae-cn", "skills"],
   // The pi family reads the shared ~/.agents/skills too, but writes its OWN root: skill removal is
-  // by fixed directory name, so installing to the shared one would make `uninstall pi` take Codex's
-  // and dsh's copy with it.
+  // by fixed directory name, so installing to the shared one would make `uninstall pi` take dsh's
+  // copy with it.
   pi: [".pi", "agent", "skills"],
   "prime-agent": [".prime", "agent", "skills"],
   // WorkBuddy's own user-level skills root (the @genie/agent-cli engine reads ~/.workbuddy).
