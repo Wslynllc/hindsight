@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 import hindsight_hermes as plugin
-from conftest import FakeClient, FakeRecallResponse
+from conftest import SECRETS, FakeClient, FakeRecallResponse
 from hindsight_client_api.exceptions import NotFoundException
 
 
@@ -754,12 +754,84 @@ def test_availability_failure_is_logged(hermes_env, caplog):
     assert "availability check failed" in caplog.text
 
 
+@pytest.mark.parametrize(
+    "config",
+    [
+        None,  # no config file and no environment
+        {},
+        {"mode": "local_external"},
+        {"mode": "cloud", "apiKey": "old-key"},
+        {"mode": "cloud", "api_url": "http://server.test", "apiKey": "old-key"},
+        {"apiKey": "key-but-no-url"},
+        {"api_url": "https://api.hindsight.vectorize.io", "apiKey": "old-key"},
+        {"apiUrl": "HTTPS://UI.Hindsight.VECTORIZE.IO./v1"},
+        {"mode": "local_external", "api_url": "vectorize.io:443"},
+    ],
+)
+def test_no_usable_server_leaves_the_provider_unavailable_and_inert(hermes_env, monkeypatch, config):
+    if config is not None:
+        (hermes_env / "hindsight").mkdir(parents=True, exist_ok=True)
+        (hermes_env / "hindsight" / "config.json").write_text(json.dumps(config))
+    instance = plugin.HindsightMemoryProvider()
+    built = []
+    monkeypatch.setattr(instance, "_new_api_client", lambda: built.append(1))
+    assert instance.is_available() is False
+    assert instance.unavailable_reason()
+    instance.initialize("session-1")
+    assert instance._mode == "disabled"
+    instance.sync_turn("what we decided", "the answer")
+    instance.shutdown()
+    assert built == []
+
+
+def test_a_vendor_host_in_the_environment_is_refused(hermes_env):
+    SECRETS["HINDSIGHT_API_URL"] = "https://api.hindsight.vectorize.io"
+    assert plugin.HindsightMemoryProvider().is_available() is False
+
+
+@pytest.mark.parametrize("url", ["https://notvectorize.io", "https://vectorize.io.home.arpa", "http://10.0.0.5:8888"])
+def test_only_the_vendor_host_is_refused(hermes_env, url):
+    SECRETS["HINDSIGHT_API_URL"] = url
+    assert plugin.HindsightMemoryProvider().is_available() is True
+
+
+@pytest.mark.parametrize("source", ["config", "env"])
+def test_a_named_server_makes_the_provider_available_in_local_external(hermes_env, source):
+    if source == "config":
+        (hermes_env / "hindsight").mkdir(parents=True, exist_ok=True)
+        (hermes_env / "hindsight" / "config.json").write_text(json.dumps({"api_url": "http://server.test"}))
+    else:
+        SECRETS["HINDSIGHT_API_URL"] = "http://server.test"
+    assert plugin.HindsightMemoryProvider().is_available() is True
+
+
+def test_setup_fetches_no_template_catalog_unless_one_is_named(hermes_env, monkeypatch):
+    import urllib.request
+
+    from hindsight_hermes import templates
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("setup reached the network")
+
+    monkeypatch.setattr(urllib.request, "urlopen", refuse)
+    picker = []
+    result = templates.run_template_step(
+        api_url="http://server.test",
+        bank_id="hermes",
+        api_key=None,
+        select=lambda *a, **k: picker.append(1),
+        cancelled=-1,
+    )
+    assert result is None
+    assert picker == []
+
+
 def test_desktop_panel_offers_every_mode_the_plugin_runs():
     """#4662: without local_embedded the panel could not hold that mode and saving rewrote it."""
     from hindsight_hermes.config_schema import CONFIG_SCHEMA
 
     mode = next(field for field in CONFIG_SCHEMA["fields"] if field["key"] == "mode")
-    assert {option[0] for option in mode["options"]} == {"cloud", "local_embedded", "local_external"}
+    assert {option[0] for option in mode["options"]} == {"local_embedded", "local_external"}
 
 
 def test_cron_runs_are_not_auto_retained(provider):
@@ -779,12 +851,12 @@ def test_retain_cron_opts_cron_runs_back_in(provider):
 
 
 @pytest.mark.parametrize("agent_context", ["subagent", "kanban"])
-def test_subagent_and_kanban_runs_are_not_auto_retained(provider, agent_context):
-    """#5555: delegated children and kanban workers would fill the bank with task chatter."""
+def test_subagent_and_kanban_capture_remains_eligible(provider, agent_context):
+    """Owned distribution preserves installed helper capture during project rollout."""
     child, fake = provider({}, agent_context=agent_context)
     child.sync_turn("work kanban task t_1", "done")
     child.shutdown()
-    assert fake.retains == []
+    assert len(fake.retains) == 1
 
 
 def test_a_kanban_worker_is_recognised_from_the_env(provider, monkeypatch):
@@ -793,7 +865,8 @@ def test_a_kanban_worker_is_recognised_from_the_env(provider, monkeypatch):
     worker, fake = provider({}, agent_context="primary")
     worker.sync_turn("work kanban task t_1", "done")
     worker.shutdown()
-    assert fake.retains == []
+    assert worker._agent_context == "kanban"
+    assert len(fake.retains) == 1
 
 
 def test_a_late_prefetch_for_a_previous_session_is_ignored(provider, monkeypatch):
