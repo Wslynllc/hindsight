@@ -202,17 +202,21 @@ class FakeClient:
 
 @pytest.fixture
 def provider(hermes_env, monkeypatch):
-    """An initialized cloud-mode provider wired to a FakeClient."""
+    """An initialized local_external provider wired to a FakeClient."""
 
     def _make(config: dict | None = None, client: FakeClient | None = None, **init_kwargs):
         import json
 
         config_path = hermes_env / "hindsight" / "config.json"
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(json.dumps({"mode": "cloud", "apiKey": "test-key", **(config or {})}))
+        config_path.write_text(
+            json.dumps(
+                {"mode": "local_external", "api_url": "http://server.test", "apiKey": "test-key", **(config or {})}
+            )
+        )
         fake = client or FakeClient()
         instance = plugin.HindsightMemoryProvider()
-        monkeypatch.setattr(instance, "_new_cloud_client", lambda: fake)
+        monkeypatch.setattr(instance, "_new_api_client", lambda: fake)
         # The /version probe is a live HTTP call; pin the capability instead.
         monkeypatch.setattr(plugin, "_check_api_supports_update_mode_append", lambda *a, **k: True)
         instance.initialize(init_kwargs.pop("session_id", "session-1"), **init_kwargs)

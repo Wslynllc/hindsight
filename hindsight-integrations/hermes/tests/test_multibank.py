@@ -11,6 +11,8 @@ import pytest
 import hindsight_hermes as plugin
 from hindsight_hermes.settings import _discover_cwd_bank_id, _repository_root
 
+SERVER = "http://server.test"
+
 HindsightMemoryProvider = plugin.HindsightMemoryProvider
 
 
@@ -86,14 +88,16 @@ def test_provider_uses_trusted_repository_config_over_the_template(tmp_path: Pat
         "trusted_project_dirs": str(tmp_path / "work"),
     }
     provider = HindsightMemoryProvider()
-    with patch.object(plugin, "_load_config", return_value=config):
+    with patch.object(plugin, "_load_config", return_value={"api_url": SERVER, **config}):
         provider.initialize(session_id="s1", cwd=str(sub))
     assert provider._bank_id == "project-x-bank"
 
 
 def _bank_for(cwd: str, template: str, **session) -> str:
     provider = HindsightMemoryProvider()
-    with patch.object(plugin, "_load_config", return_value={"bank_id": "hermes", "bank_id_template": template}):
+    with patch.object(
+        plugin, "_load_config", return_value={"api_url": SERVER, "bank_id": "hermes", "bank_id_template": template}
+    ):
         provider.initialize(session_id="s", cwd=cwd, **session)
     return provider._bank_id
 
@@ -376,7 +380,7 @@ def test_mirror_uses_the_nested_bank_id_form_like_the_fallback(tmp_path: Path):
     (repo / ".git").mkdir(parents=True)
     config = {"banks": {"hermes": {"bankId": "personal"}}, "bank_id_template": "{project}", "mirror_to_own_bank": True}
     provider = HindsightMemoryProvider()
-    with patch.object(plugin, "_load_config", return_value=config):
+    with patch.object(plugin, "_load_config", return_value={"api_url": SERVER, **config}):
         provider.initialize(session_id="s1", cwd=str(repo))
 
     assert provider._bank_id == "repo"
@@ -400,7 +404,7 @@ def test_empty_nested_bank_id_never_puts_an_empty_bank_in_the_write_set(tmp_path
     (repo / ".git").mkdir(parents=True)
     config = {"banks": {"hermes": {"bankId": ""}}, "bank_id_template": "{project}", "mirror_to_own_bank": True}
     provider = HindsightMemoryProvider()
-    with patch.object(plugin, "_load_config", return_value=config):
+    with patch.object(plugin, "_load_config", return_value={"api_url": SERVER, **config}):
         provider.initialize(session_id="s1", cwd=str(repo))
     assert provider._write_bank_ids == ["repo", "hermes"]
 
@@ -545,7 +549,7 @@ def test_trusted_config_survives_an_unreadable_git_file(tmp_path: Path):
         "trusted_project_dirs": str(tmp_path / "work"),
     }
     provider = HindsightMemoryProvider()
-    with patch.object(plugin, "_load_config", return_value=config):
+    with patch.object(plugin, "_load_config", return_value={"api_url": SERVER, **config}):
         provider.initialize(session_id="s1", cwd=str(repo))
     assert provider._bank_id == "acme"
 

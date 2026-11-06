@@ -14,21 +14,19 @@ from hermes_cli.secret_prompt import masked_secret_prompt
 from . import templates as _hs_templates
 from .embedded import _embedded_profile_env_path, _load_simple_env, _materialize_embedded_profile_env
 from .settings import (
-    _DEFAULT_API_URL,
     _DEFAULT_IDLE_TIMEOUT,
-    _DEFAULT_LOCAL_URL,
     _DEFAULT_TIMEOUT,
     _MIN_CLIENT_VERSION,
     _PROVIDER_DEFAULT_MODELS,
+    _is_vendor_hosted,
 )
 
-_MODE_VALUES = ["cloud", "local_embedded", "local_external"]
+_MODE_VALUES = ["local_external", "local_embedded"]
 _MODE_ITEMS = [
-    ("Cloud", "Hindsight Cloud API (lightweight, just needs an API key)"),
+    ("Local External", "Connect to an existing Hindsight instance"),
     # Measured from the resolved wheel set: 482 MB on macOS arm64, 3.2 GB on Linux x86_64
     # (the CUDA wheels torch pulls there). "~200MB" was wrong by 1.5x / 16x.
     ("Local Embedded", "Run Hindsight locally (downloads 0.5-3 GB, needs LLM key)"),
-    ("Local External", "Connect to an existing Hindsight instance"),
 ]
 
 
@@ -140,18 +138,13 @@ def run_setup(provider, hermes_home: str, config: dict) -> None:
     print("\n  Checking dependencies...")
     _check_mode_dependencies(mode)
 
-    if mode == "cloud":
-        print("\n  Get your API key at https://ui.hindsight.vectorize.io\n")
-        existing_key = get_secret("HINDSIGHT_API_KEY", "") or ""
-        masked = f"...{existing_key[-4:]}" if len(existing_key) > 4 else "set"
-        api_key = _secret_prompt(f"  API key (current: {masked}, blank to keep): " if existing_key else "  API key: ")
-        if api_key:
-            env_writes["HINDSIGHT_API_KEY"] = api_key
-        if val := input(f"  API URL [{_DEFAULT_API_URL}]: ").strip():
-            provider_config["api_url"] = val
-    elif mode == "local_external":
-        val = input(f"  Hindsight API URL [{_DEFAULT_LOCAL_URL}]: ").strip()
-        provider_config["api_url"] = val or _DEFAULT_LOCAL_URL
+    if mode == "local_external":
+        current_url = provider_config.get("api_url") or get_secret("HINDSIGHT_API_URL", "") or ""
+        val = input(f"  Hindsight API URL{f' [{current_url}]' if current_url else ''}: ").strip()
+        provider_config["api_url"] = val or current_url
+        if not provider_config["api_url"] or _is_vendor_hosted(provider_config["api_url"]):
+            print("\n  That needs the URL of a server you run. Nothing was saved; Hindsight stays unavailable.\n")
+            return
         if api_key := _secret_prompt("  API key (optional, blank to skip): "):
             env_writes["HINDSIGHT_API_KEY"] = api_key
     else:
@@ -178,9 +171,8 @@ def run_setup(provider, hermes_home: str, config: dict) -> None:
     if _hs_templates.supported_for_mode(mode):
         from hermes_cli.memory_setup import _CANCELLED, _curses_select
 
-        default_url = _DEFAULT_LOCAL_URL if mode == "local_external" else _DEFAULT_API_URL
         _hs_templates.run_template_step(
-            api_url=provider_config.get("api_url") or default_url,
+            api_url=provider_config["api_url"],
             bank_id=provider_config.get("bank_id", "hermes"),
             api_key=env_writes.get("HINDSIGHT_API_KEY") or os.environ.get("HINDSIGHT_API_KEY", "") or None,
             select=_curses_select,

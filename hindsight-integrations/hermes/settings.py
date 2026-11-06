@@ -12,17 +12,16 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List
+from urllib.parse import urlsplit
 
 # Log under the plugin package's own logger name (loader-path independent).
 logger = logging.getLogger(__name__.rpartition(".")[0])
 
-_DEFAULT_API_URL = "https://api.hindsight.vectorize.io"
-_DEFAULT_LOCAL_URL = "http://localhost:8888"
 # Keep in sync with plugin.yaml and pyproject.toml. Raised to 0.10.1 with the embed
 # floor (see pyproject.toml): _maybe_upgrade_client() then pulls the 0.10.0 cohort's
 # client forward on session start instead of waiting for a `hermes update`.
 _MIN_CLIENT_VERSION = "0.10.1"
-_DEFAULT_TIMEOUT = 120  # seconds — cloud API can take 30-40s per request
+_DEFAULT_TIMEOUT = 120  # seconds — an API can take 30-40s per request
 _DEFAULT_IDLE_TIMEOUT = 300  # seconds — Hindsight embedded daemon default
 # ``metadata.source`` on retained memories is OPT-IN (AGENTS.md forbids
 # on-by-default attribution tags): ``retain_source`` / HINDSIGHT_RETAIN_SOURCE.
@@ -57,6 +56,17 @@ _PROVIDER_DEFAULT_MODELS = {
 # The embedded daemon speaks OpenAI wire format for these providers.
 _OPENAI_WIRE_PROVIDERS = {"openai_compatible", "openrouter"}
 _OBSERVATION_SCOPE_KEYWORDS = {"per_tag", "combined", "all_combinations", "shared"}
+
+
+def _is_vendor_hosted(url: Any) -> bool:
+    """Whether *url* is on the vendor's hosted domain, which this build never talks to. Matches the
+    host however it is written, with or without a scheme; an unparsable URL counts as refused."""
+    text = str(url or "").strip()
+    try:
+        host = urlsplit(text if "://" in text else f"http://{text}").hostname or ""
+    except ValueError:
+        return True
+    return re.search(r"(^|\.)vectorize\.io\.?$", host, re.IGNORECASE) is not None
 
 
 def _parse_int_setting(value: Any, default: int) -> int:

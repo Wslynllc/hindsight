@@ -20,7 +20,7 @@ Follow [Migrate hindsight-hermes to Native Hermes Memory](/guides/2026/04/14/gui
 to switch over while keeping the same memory bank.
 :::
 
-Long-term memory with knowledge graph, entity resolution, and multi-strategy retrieval. Supports cloud, local embedded, and local external modes.
+Long-term memory with knowledge graph, entity resolution, and multi-strategy retrieval. Supports local external and local embedded modes. This build has no hosted mode and no default server.
 
 A [Hermes Agent](https://github.com/NousResearch/hermes-agent) memory-provider plugin, installed from
 the Hermes plugin catalog. It used to ship inside Hermes as `plugins/memory/hindsight/`; Nous Research
@@ -32,7 +32,18 @@ and the catalog pins it from there.
 
 ## Install
 
-Hindsight is in the Hermes plugin catalog, so the name is all you need:
+This fork installs from its own checkout. Commit first, because Hermes clones the checked-out commit,
+and do not use the bare name, which installs the upstream catalog pin instead:
+
+```bash
+hermes plugins install "file:///path/to/hindsight-local#hindsight-integrations/hermes"
+hermes memory setup           # select "hindsight", then "Local External", and enter your server URL
+```
+
+Hermes warns that `file://` is an unverified source. Plugin dependencies (`hindsight-client`,
+`hindsight-embed`) still install from PyPI through Hermes' package manager.
+
+The upstream catalog install, for reference:
 
 ```bash
 hermes plugins install hindsight
@@ -64,7 +75,7 @@ That is not a size optimisation, it is the only shape that installs. `hindsight-
 `protobuf>=7.35.1` while `mem0ai==2.0.10` and `modal==1.5.5` cap it below 7.0, and
 `opentelemetry-semantic-conventions>=0.65b0` while `mistralai==2.4.8` caps it below 0.61. Relaxing
 one pin only uncovers the next. It is also 482 MB on macOS arm64 and 3.2 GB on Linux x86_64 (the
-CUDA wheels torch pulls there) that cloud-mode users would pay for nothing.
+CUDA wheels torch pulls there) that local_external users would pay for nothing.
 
 `_new_embedded_client` therefore composes what the old `hindsight.HindsightEmbedded` wrapper composed
 internally — `hindsight_embed.get_embed_manager()` plus `hindsight_client.Hindsight` — instead of
@@ -94,7 +105,7 @@ disk, looks the name up in the plugin catalog and installs it at the reviewed co
   (your memory.hindsight settings and data are unchanged).
 ```
 
-Your data never lived in the Hermes tree: memories are in your Hindsight bank — Hindsight Cloud, or
+Your data never lived in the Hermes tree: memories are in your Hindsight bank — on your server, or
 for `local_embedded` the profile directory `~/.hindsight/profiles/<profile>` and its embedded
 PostgreSQL instance. Moving the provider code does not touch any of it, and your
 `~/.hermes/hindsight/config.json` is read exactly as before.
@@ -170,9 +181,8 @@ which is what records the current pin.
 
 ## Requirements
 
-- **Cloud:** API key from [ui.hindsight.vectorize.io](https://ui.hindsight.vectorize.io)
 - **Local Embedded:** API key for a supported LLM provider (OpenAI, Anthropic, Gemini, Groq, OpenRouter, MiniMax, Ollama, or any OpenAI-compatible endpoint). Embeddings and reranking run locally — no additional API keys needed.
-- **Local External:** A running Hindsight instance (Docker or self-hosted) reachable over HTTP.
+- **Local External:** A running Hindsight instance (Docker or self-hosted) reachable over HTTP. With no URL configured the provider reports itself unavailable and sends nothing.
 
 ## Setup
 
@@ -180,17 +190,14 @@ which is what records the current pin.
 hermes memory setup    # select "hindsight"
 ```
 
-The setup wizard installs nothing (dependencies come with the plugin), walks you through configuration, and offers to seed the bank with a **starter memory template** (a curated set of dispositions/instructions for common agent roles) — you can skip it, and it warns before overwriting an already-configured bank.
+The setup wizard installs nothing (dependencies come with the plugin) and walks you through configuration. It offers a **starter memory template** only when `HINDSIGHT_TEMPLATES_URL` names a catalog; by default it fetches nothing.
 
-Or manually (cloud mode with defaults):
+Or manually:
 ```bash
 hermes config set memory.provider hindsight
-echo "HINDSIGHT_API_KEY=your-key" >> ~/.hermes/.env
+echo "HINDSIGHT_API_URL=http://<server>:8888" >> ~/.hermes/.env
+echo "HINDSIGHT_API_KEY=your-key" >> ~/.hermes/.env   # only if your server requires one
 ```
-
-### Cloud
-
-Connects to the Hindsight Cloud API. Requires an API key from [ui.hindsight.vectorize.io](https://ui.hindsight.vectorize.io).
 
 ### Local Embedded
 
@@ -231,9 +238,9 @@ Some keys also accept an older name: `apiKey` for `api_key`, `budget` for `recal
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `mode` | `cloud` | `cloud`, `local_embedded`, or `local_external` |
-| `api_url` | `https://api.hindsight.vectorize.io` (cloud), `http://localhost:8888` (local_external) | API URL. Falls back to `HINDSIGHT_API_URL` when unset. |
-| `api_key` | — | Hindsight API key. Required for cloud, optional for local_external. Falls back to `HINDSIGHT_API_KEY` when unset; the setup wizard stores it there. |
+| `mode` | `local_external` | `local_external` or `local_embedded`. Any other value leaves the provider unavailable. |
+| `api_url` | — | URL of your server, required for `local_external`. Falls back to `HINDSIGHT_API_URL` when unset. Any `vectorize.io` host is refused, which leaves the provider unavailable. |
+| `api_key` | — | Hindsight API key, optional. Falls back to `HINDSIGHT_API_KEY` when unset; the setup wizard stores it there. |
 | `timeout` | `120` | Seconds to wait for each Hindsight API request. Falls back to `HINDSIGHT_TIMEOUT` when unset. |
 
 ### Memory Bank
@@ -402,7 +409,7 @@ These are used **only when there is no config file at all**. Once `hermes memory
 
 | Variable | Description |
 |----------|-------------|
-| `HINDSIGHT_MODE` | Mode: `cloud`, `local_embedded` or `local_external` (`mode`) |
+| `HINDSIGHT_MODE` | Mode: `local_external` or `local_embedded` (`mode`) |
 | `HINDSIGHT_BUDGET` | Recall budget (`recall_budget`) |
 | `HINDSIGHT_RETAIN_CONTEXT` | Label stored with each retained conversation (`retain_context`) |
 | `HINDSIGHT_RETAIN_INDICATOR` | `false` hides the "saving to memory" status line (`retain_indicator`) |
