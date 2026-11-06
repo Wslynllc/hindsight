@@ -988,9 +988,7 @@ class HindsightMemoryProvider(MemoryProvider):
                 # Reachable only by a host that keeps a provider is_available() refused.
                 raise RuntimeError("Hindsight is disabled: no usable server")
             if self._client is None:
-                self._client = (
-                    self._new_embedded_client() if self._mode == "local_embedded" else self._new_api_client()
-                )
+                self._client = self._new_embedded_client() if self._mode == "local_embedded" else self._new_api_client()
             return self._client
 
     def _run_sync(self, coro):
@@ -2141,8 +2139,12 @@ class HindsightMemoryProvider(MemoryProvider):
 
         def _write(bank_id: str) -> None:
             resp = self._retain_batch(
-                item, bank_id=bank_id, retain_async=retain_async, operation_id=operation_ids[bank_id],
-                origin_cwd=origin_cwd, project_required=project_required,
+                item,
+                bank_id=bank_id,
+                retain_async=retain_async,
+                operation_id=operation_ids[bank_id],
+                origin_cwd=origin_cwd,
+                project_required=project_required,
             )
             if retain_async:
                 self._track_retain_ops(resp, bank_id, wait=False)
@@ -2176,8 +2178,11 @@ class HindsightMemoryProvider(MemoryProvider):
                 context,
             )
             resp = self._retain_batch(
-                item, bank_id=bank_id, retain_async=self._retain_async,
-                origin_cwd=origin_cwd, project_required=project_required,
+                item,
+                bank_id=bank_id,
+                retain_async=self._retain_async,
+                origin_cwd=origin_cwd,
+                project_required=project_required,
             )
             if self._retain_async:
                 self._track_retain_ops(resp, bank_id)

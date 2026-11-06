@@ -95,7 +95,9 @@ def test_provider_uses_trusted_repository_config_over_the_template(tmp_path: Pat
 
 def _bank_for(cwd: str, template: str, **session) -> str:
     provider = HindsightMemoryProvider()
-    with patch.object(plugin, "_load_config", return_value={"api_url": SERVER, "bank_id": "hermes", "bank_id_template": template}):
+    with patch.object(
+        plugin, "_load_config", return_value={"api_url": SERVER, "bank_id": "hermes", "bank_id_template": template}
+    ):
         provider.initialize(session_id="s", cwd=cwd, **session)
     return provider._bank_id
 

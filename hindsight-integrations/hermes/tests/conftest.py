@@ -209,7 +209,11 @@ def provider(hermes_env, monkeypatch):
 
         config_path = hermes_env / "hindsight" / "config.json"
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(json.dumps({"mode": "local_external", "api_url": "http://server.test", "apiKey": "test-key", **(config or {})}))
+        config_path.write_text(
+            json.dumps(
+                {"mode": "local_external", "api_url": "http://server.test", "apiKey": "test-key", **(config or {})}
+            )
+        )
         fake = client or FakeClient()
         instance = plugin.HindsightMemoryProvider()
         monkeypatch.setattr(instance, "_new_api_client", lambda: fake)

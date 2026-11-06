@@ -85,9 +85,12 @@ def _capture_stamp(policy: dict, cwd: str) -> CaptureStamp:
     # disabling policy needs review, rather than silently approximating precedence.
     harnesses = config.get("harnesses", {})
     if not isinstance(harnesses, dict) or any(
-        not isinstance(section, dict) or "disabled" in section or "paths" in section
+        not isinstance(section, dict)
+        or "disabled" in section
+        or "paths" in section
         or section.get("retainSessions", True) is not True
-        or section.get("optInOnly", False) is not False or section.get("banks")
+        or section.get("optInOnly", False) is not False
+        or section.get("banks")
         or section.get("mapPathToBank")
         for section in harnesses.values()
     ):

@@ -6,7 +6,14 @@ from conftest import SECRETS, FakeClient
 
 
 def _provider_from_env(monkeypatch, **env) -> plugin.HindsightMemoryProvider:
-    SECRETS.update({"HINDSIGHT_MODE": "local_external", "HINDSIGHT_API_URL": "http://server.test", "HINDSIGHT_API_KEY": "test-key", **env})
+    SECRETS.update(
+        {
+            "HINDSIGHT_MODE": "local_external",
+            "HINDSIGHT_API_URL": "http://server.test",
+            "HINDSIGHT_API_KEY": "test-key",
+            **env,
+        }
+    )
     instance = plugin.HindsightMemoryProvider()
     monkeypatch.setattr(instance, "_new_api_client", lambda: FakeClient())
     monkeypatch.setattr(plugin, "_check_api_supports_update_mode_append", lambda *a, **k: True)

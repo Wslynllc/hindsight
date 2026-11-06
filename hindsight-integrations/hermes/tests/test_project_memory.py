@@ -24,18 +24,30 @@ def _git(*args):
 
 def _repository(path):
     _git("init", "-q", str(path))
-    _git("-C", str(path), "-c", "user.name=Synthetic", "-c", "user.email=synthetic@example.invalid",
-         "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-q",
-         "--allow-empty", "-m", "synthetic fixture")
+    _git(
+        "-C",
+        str(path),
+        "-c",
+        "user.name=Synthetic",
+        "-c",
+        "user.email=synthetic@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "-c",
+        "core.hooksPath=/dev/null",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "synthetic fixture",
+    )
 
 
 def _bind_exclusions(policy, prefixes, **overrides):
     data = json.dumps({"paths": {str(path): {"disabled": True} for path in prefixes}, **overrides}).encode()
     Path(policy["exclusion_config"]).write_bytes(data)
     policy["exclusion_config_sha256"] = hashlib.sha256(data).hexdigest()
-    policy["excluded_path_ids"] = [
-        hashlib.sha256(json.dumps(str(path)).encode()).hexdigest()[:16] for path in prefixes
-    ]
+    policy["excluded_path_ids"] = [hashlib.sha256(json.dumps(str(path)).encode()).hexdigest()[:16] for path in prefixes]
 
 
 @dataclass
@@ -106,9 +118,7 @@ def test_checkout_subdirectory_and_real_worktree_share_project(provider, project
         item = _item(fake)
         assert fake.retains[0]["bank_id"] == BANK
         assert item["observation_scopes"] == [["project:*"]]
-        assert set(item["tags"]) == {
-            "project:owned-main", "manual:kept", "literal:{unchanged}", "session:session-1"
-        }
+        assert set(item["tags"]) == {"project:owned-main", "manual:kept", "literal:{unchanged}", "session:session-1"}
         assert item["metadata"]["repo"] == item["metadata"]["project"] == "owned-main"
         identity = item["metadata"]["worktree_id"]
         assert re.fullmatch("[0-9a-f]{64}", identity)
@@ -150,13 +160,18 @@ def test_project_routes_enforce_valid_binding_before_transport(provider, project
     assert len(fake.retains) == 1
 
 
-@pytest.mark.parametrize("restriction", [
-    {"disabled": True}, {"retainSessions": False}, {"optInOnly": True},
-    {"mapPathToBank": {"/synthetic": "private-synthetic"}},
-    {"harnesses": {"codex": {"retainSessions": False}}},
-    {"harnesses": {"codex": {"optInOnly": True}}},
-    {"banks": {BANK: {"disabled": True}}},
-])
+@pytest.mark.parametrize(
+    "restriction",
+    [
+        {"disabled": True},
+        {"retainSessions": False},
+        {"optInOnly": True},
+        {"mapPathToBank": {"/synthetic": "private-synthetic"}},
+        {"harnesses": {"codex": {"retainSessions": False}}},
+        {"harnesses": {"codex": {"optInOnly": True}}},
+        {"banks": {BANK: {"disabled": True}}},
+    ],
+)
 def test_capture_policy_does_not_bypass_capture_restrictions(provider, project_layout, restriction):
     repo, excluded, config = project_layout.repo, project_layout.excluded, project_layout.config
     policy = config["project_memory"]
@@ -173,11 +188,22 @@ def test_capture_policy_does_not_bypass_capture_restrictions(provider, project_l
     assert len(fake.retains) == 1
 
 
-@pytest.mark.parametrize("defect", [
-    "missing-policy", "invalid-policy", "missing-cwd", "unknown-root", "non-git",
-    "hash", "missing-config", "malformed-worktree", "wrong-bank", "wrong-scopes",
-    "conflicting-tag",
-])
+@pytest.mark.parametrize(
+    "defect",
+    [
+        "missing-policy",
+        "invalid-policy",
+        "missing-cwd",
+        "unknown-root",
+        "non-git",
+        "hash",
+        "missing-config",
+        "malformed-worktree",
+        "wrong-bank",
+        "wrong-scopes",
+        "conflicting-tag",
+    ],
+)
 def test_project_binding_failures_send_no_additional_retain(provider, project_layout, defect):
     repo, worktree, config = project_layout.repo, project_layout.worktree, project_layout.config
     origin = worktree if defect == "malformed-worktree" else repo
@@ -218,9 +244,14 @@ def test_project_binding_failures_send_no_additional_retain(provider, project_la
     assert len(fake.retains) == 1
 
 
-@pytest.mark.parametrize("context,retain_cron,expected", [
-    ("subagent", False, 1), ("cron", False, 0), ("cron", True, 1),
-])
+@pytest.mark.parametrize(
+    "context,retain_cron,expected",
+    [
+        ("subagent", False, 1),
+        ("cron", False, 0),
+        ("cron", True, 1),
+    ],
+)
 def test_project_mode_preserves_helper_and_cron_policy(provider, project_layout, context, retain_cron, expected):
     repo, config = project_layout.repo, project_layout.config
     config = {**config, "retain_cron": retain_cron}
@@ -236,9 +267,7 @@ def test_project_mode_preserves_helper_and_cron_policy(provider, project_layout,
 
 @pytest.mark.parametrize("route,cadence", [("automatic", 1), ("automatic", 3), ("builtin", 1)])
 @pytest.mark.parametrize("changed_origin", [False, True])
-def test_old_queued_or_buffered_work_survives_session_switch(
-    provider, project_layout, route, cadence, changed_origin
-):
+def test_old_queued_or_buffered_work_survives_session_switch(provider, project_layout, route, cadence, changed_origin):
     repo, other, config = project_layout.repo, project_layout.other, project_layout.config
     instance, fake = provider({**config, "retain_every_n_turns": cadence}, cwd=str(repo))
     entered, release = threading.Event(), threading.Event()
@@ -261,10 +290,12 @@ def test_old_queued_or_buffered_work_survives_session_switch(
         release.set()
         instance.shutdown()
     assert [call.get("document_id") for call in fake.retains] == [
-        "session-1" if route == "automatic" else None, "session-2"
+        "session-1" if route == "automatic" else None,
+        "session-2",
     ]
     assert [call["items"][0]["metadata"]["repo"] for call in fake.retains] == [
-        "owned-main", "other-main" if changed_origin else "owned-main"
+        "owned-main",
+        "other-main" if changed_origin else "owned-main",
     ]
     old_content = _item(fake)["content"]
     if route == "automatic":
