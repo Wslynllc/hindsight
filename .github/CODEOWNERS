@@ -1,0 +1,14 @@
+# Wslynllc/hindsight, the fork of vectorize-io/hindsight used by the memory server.
+# The owner's tap (@rkroelin-yes) covers only what adds or deletes infrastructure, changes
+# permissions or deploys to production (Wslynllc/project-standards "Owner approval.md").
+# No default owner: every path not listed is agent-reviewed and merges without a tap.
+# Last matching rule wins, so the unowned docs and tests lines come after the owned paths
+# and /.github/ (workflows and this file, which control permissions) comes last, owned in full.
+# The owned Hermes provider: the fork's only divergence from upstream, distributed to the
+# live Hermes clients. The memory server itself runs the upstream image, not a build from
+# this fork. Upstream code, docs and tests stay agent-reviewed.
+/hindsight-integrations/hermes/ @rkroelin-yes
+**/tests/
+**/*.md
+# Workflows here publish images, packages and docs with repository credentials.
+/.github/ @rkroelin-yes
