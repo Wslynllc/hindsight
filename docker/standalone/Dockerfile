@@ -85,7 +85,7 @@ RUN if [ "$INCLUDE_LOCAL_MODELS" = "true" ]; then \
 # =============================================================================
 # Stage: SDK Builder (needed for Control Plane)
 # =============================================================================
-FROM node:24-slim AS sdk-builder
+FROM node:24.22.3-slim AS sdk-builder
 
 WORKDIR /app
 
@@ -100,7 +100,7 @@ RUN npm ci --ignore-scripts -w @vectorize-io/hindsight-client \
 # =============================================================================
 # Stage: Control Plane Builder
 # =============================================================================
-FROM node:24-slim AS cp-builder
+FROM node:24.22.3-slim AS cp-builder
 
 # Mirror the monorepo layout under /app/memory-poc: next.config sets the
 # monorepo root to the control plane's parent directory.
@@ -266,7 +266,7 @@ CMD ["/app/start-all.sh"]
 # =============================================================================
 # Stage: Final Image - Control Plane Only
 # =============================================================================
-FROM node:24-alpine AS cp-only
+FROM node:24.22.3-alpine AS cp-only
 
 WORKDIR /app
 
@@ -359,7 +359,7 @@ RUN apt-get update && apt-get upgrade -y \
 # path - and its `[ -e ]` guard against a base bump moving that path - is gone
 # with it. corepack does not come along either; nothing invoked it.
 #
-# node:24-slim and python:3.11-slim are both Debian and glibc is backward
+# node:24.22.3-slim and python:3.11-slim are both Debian and glibc is backward
 # compatible, so the binary runs here. `node --version` fails the build if a
 # base change on either side ever breaks that, rather than shipping an image
 # whose control plane cannot start.
