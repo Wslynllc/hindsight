@@ -5,6 +5,7 @@ import asyncio
 import json
 import sys
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -880,6 +881,71 @@ def test_a_late_prefetch_for_a_previous_session_is_ignored(provider, monkeypatch
     instance._prefetch_thread.join(5)
     instance.shutdown()
     assert calls == ["new query"]
+
+
+# Homelab-Memory#65: the end-of-turn recall that queue_prefetch starts is for the *next* turn. A
+# one-shot run has none, shutdown() waits 5 s for it and then closes the connection, and the
+# server cancels a recall nobody reads (HTTP 499, ~half of all recalls).
+@pytest.mark.parametrize("agent_context", ["kanban", "subagent", "cron"])
+def test_a_one_shot_run_starts_no_end_of_turn_recall(provider, agent_context):
+    instance, fake = provider({}, client=FakeClient(recall_texts=["fact one"]), agent_context=agent_context)
+    instance.queue_prefetch("q", session_id="session-1")
+    if instance._prefetch_thread is not None:
+        instance._prefetch_thread.join(5)
+    assert fake.recalls == []
+    assert instance.prefetch("next") == ""  # nothing was primed, and nothing waits for it
+    instance.shutdown()
+    assert fake.recalls == []
+
+
+def test_a_kanban_worker_recognised_from_the_env_starts_no_end_of_turn_recall(provider, monkeypatch):
+    """Hermes starts kanban workers as "primary" CLI runs and marks them only in the env (#5555)."""
+    monkeypatch.setenv("HERMES_KANBAN_TASK", "t_1")
+    worker, fake = provider({}, agent_context="primary")
+    assert worker._agent_context == "kanban"
+    worker.queue_prefetch("q", session_id="session-1")
+    if worker._prefetch_thread is not None:
+        worker._prefetch_thread.join(5)
+    worker.shutdown()
+    assert fake.recalls == []
+
+
+def test_a_live_chat_still_queues_the_end_of_turn_recall(provider):
+    primary, fake = provider({}, client=FakeClient(recall_texts=["fact one"]), agent_context="primary")
+    primary.queue_prefetch("q", session_id="session-1")
+    primary._prefetch_thread.join(5)
+    assert len(fake.recalls) == 1
+    assert "- fact one" in primary.prefetch("next")
+    primary.shutdown()
+    assert len(fake.recalls) == 1
+
+
+def test_shutdown_with_a_recall_in_flight_returns_within_its_bound(provider):
+    """The 5 s join in shutdown() stays a bound: a stuck recall must not hold the process or raise."""
+    started, release = threading.Event(), threading.Event()
+
+    class StuckRecall(FakeClient):
+        async def arecall(self, **kwargs):
+            started.set()
+            while not release.is_set():
+                await asyncio.sleep(0.01)
+            return FakeRecallResponse(["late memory"])
+
+    instance, _ = provider({}, client=StuckRecall(), agent_context="primary")
+    worker = None
+    try:
+        instance.queue_prefetch("q", session_id="session-1")
+        worker = instance._prefetch_thread
+        assert started.wait(5), "the recall never started"
+        began = time.monotonic()
+        instance.shutdown()  # must not raise
+        elapsed = time.monotonic() - began
+        assert 4.5 <= elapsed < 8, f"shutdown took {elapsed:.1f}s; the join bound is 5 s"
+        assert instance._client is None
+    finally:
+        release.set()
+        if worker is not None:
+            worker.join(5)
 
 
 def test_plugin_version_reads_plugin_yaml_as_utf8(monkeypatch):

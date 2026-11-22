@@ -140,6 +140,8 @@ def hermes_env(tmp_path, monkeypatch):
     for var in list(__import__("os").environ):
         if var.startswith("HINDSIGHT_"):
             monkeypatch.delenv(var, raising=False)
+    # A kanban worker running the suite has this set, and the provider reads it as agent_context.
+    monkeypatch.delenv("HERMES_KANBAN_TASK", raising=False)
     yield tmp_path
     SECRETS.clear()
 
