@@ -16,10 +16,14 @@ from hermes_cli.urllib_security import open_credentialed_url
 
 logger = logging.getLogger(__name__)
 
+# Same file that powers hindsight.vectorize.io/templates.
+_DEFAULT_CATALOG_URL = (
+    "https://raw.githubusercontent.com/vectorize-io/hindsight/main/hindsight-docs/src/data/templates.json"
+)
 _HTTP_TIMEOUT = 15
 
 # The API must be reachable during setup; a local_embedded daemon isn't up yet.
-SUPPORTED_MODES = ("local_external",)
+SUPPORTED_MODES = ("cloud", "local_external")
 
 
 def supported_for_mode(mode: str) -> bool:
@@ -27,13 +31,12 @@ def supported_for_mode(mode: str) -> bool:
 
 
 def catalog_url() -> str:
-    """The catalog to offer, or "". There is no default: setup fetches nothing unless you name one."""
-    return os.environ.get("HINDSIGHT_TEMPLATES_URL", "")
+    return os.environ.get("HINDSIGHT_TEMPLATES_URL", _DEFAULT_CATALOG_URL)
 
 
 def _get_json(url: str) -> dict:
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:  # noqa: S310 - operator-supplied catalog
+    with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:  # noqa: S310 - fixed https catalog
         return json.loads(resp.read().decode("utf-8"))
 
 
@@ -90,8 +93,6 @@ def run_template_step(*, api_url: str, bank_id: str, api_key: str | None, select
     """Wizard starter-template step. ``select(title, items, default, cancel_returns)``
     is the picker (injected: testable without curses). Returns the applied template
     id, or None if skipped/blank/failed. Never raises — a template is a nice-to-have."""
-    if not catalog_url():
-        return None
     try:
         entries = fetch_hermes_templates()
     except Exception as e:  # network/parse — non-fatal
@@ -130,5 +131,5 @@ def run_template_step(*, api_url: str, bank_id: str, api_key: str | None, select
         log(f"  ✓ Applied '{entry.get('name', entry['id'])}' template to bank '{bank_id}'")
         return entry["id"]
     except Exception as e:
-        log(f"  ⚠ Could not apply template ({e}). You can apply one later through the bank import API.")
+        log(f"  ⚠ Could not apply template ({e}). You can apply one later from hindsight.vectorize.io/templates.")
         return None

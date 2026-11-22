@@ -5,12 +5,13 @@ import asyncio
 import json
 import sys
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
 
 import hindsight_hermes as plugin
-from conftest import SECRETS, FakeClient, FakeRecallResponse
+from conftest import FakeClient, FakeRecallResponse
 from hindsight_client_api.exceptions import NotFoundException
 
 
@@ -47,7 +48,32 @@ def test_retain_every_n_turns_buffers_then_ships_the_batch(provider):
     instance.shutdown()
 
     assert len(fake.retains) == 1
-    assert _retain_item(fake)["metadata"]["message_count"] == "4"
+    assert len(_messages_of(fake)) == 4
+
+
+def test_appends_carry_no_per_call_metadata(provider):
+    """#6241: an append relabels every memory of the session document, so a value that changes on
+    each call (a timestamp, a counter) made every turn rewrite all of the session's memories."""
+    instance, fake = provider({})
+    instance.sync_turn("one", "1")
+    instance.sync_turn("two", "2")
+    instance.shutdown()
+
+    first, second = (call["items"][0]["metadata"] for call in fake.retains)
+    assert first == second and first["session_id"] == "session-1"
+    assert not {"retained_at", "message_count", "turn_index"} & first.keys()
+
+
+def test_non_append_retains_keep_per_call_metadata(provider, monkeypatch):
+    instance, fake = provider({"retain_every_n_turns": 2})
+    # The fixture pins the append probe on; an API without append gets per-call documents.
+    monkeypatch.setattr(plugin, "_check_api_supports_update_mode_append", lambda *a, **k: False)
+    instance.sync_turn("one", "1")
+    instance.sync_turn("two", "2")
+    instance.shutdown()
+
+    metadata = _retain_item(fake)["metadata"]
+    assert metadata["message_count"] == "4" and "retained_at" in metadata
 
 
 def test_shutdown_flushes_turns_below_the_retain_cadence(provider):
@@ -586,7 +612,7 @@ def test_an_unreachable_server_is_asked_again_not_cached(version_probe, monkeypa
     assert plugin._check_api_supports_update_mode_append("http://hs.test") is False
     # Inside the retry window a hung server is not asked again on every turn.
     assert plugin._check_api_supports_update_mode_append("http://hs.test") is False
-    assert down.calls == ["/v1/version", "/version"]
+    assert down.calls == ["/v1/version", "/version", "/api/version"]
 
     monkeypatch.setattr(plugin, "_APPEND_PROBE_RETRY_S", 0.0)
     up = version_probe({"/v1/version": {"api_version": "0.10.3"}})
@@ -616,7 +642,7 @@ def test_an_old_server_answer_is_cached(version_probe):
     old = version_probe({"/v1/version": 404, "/version": 404})
     assert plugin._check_api_supports_update_mode_append("http://hs.test") is False
     assert plugin._check_api_supports_update_mode_append("http://hs.test") is False
-    assert old.calls == ["/v1/version", "/version"]
+    assert old.calls == ["/v1/version", "/version", "/api/version"]
 
 
 def test_version_falls_back_to_the_bare_path(version_probe):
@@ -624,6 +650,13 @@ def test_version_falls_back_to_the_bare_path(version_probe):
     server = version_probe({"/v1/version": 404, "/version": {"version": "0.5.0"}})
     assert plugin._check_api_supports_update_mode_append("http://hs.test") is True
     assert server.calls == ["/v1/version", "/version"]
+
+
+def test_version_falls_back_to_the_control_plane_path(version_probe):
+    """#6137: a proxy that fronts the control plane at the root answers only /api/version."""
+    server = version_probe({"/v1/version": 404, "/version": 404, "/api/version": {"version": "1.0.0"}})
+    assert plugin._check_api_supports_update_mode_append("http://hs.test") is True
+    assert server.calls == ["/v1/version", "/version", "/api/version"]
 
 
 def test_retain_tool_honours_retain_async(provider):
@@ -754,76 +787,21 @@ def test_availability_failure_is_logged(hermes_env, caplog):
     assert "availability check failed" in caplog.text
 
 
-@pytest.mark.parametrize(
-    "config",
-    [
-        None,  # no config file and no environment
-        {},
-        {"mode": "local_external"},
-        {"mode": "cloud", "apiKey": "old-key"},
-        {"mode": "cloud", "api_url": "http://server.test", "apiKey": "old-key"},
-        {"apiKey": "key-but-no-url"},
-        {"api_url": "https://api.hindsight.vectorize.io", "apiKey": "old-key"},
-        {"apiUrl": "HTTPS://UI.Hindsight.VECTORIZE.IO./v1"},
-        {"mode": "local_external", "api_url": "vectorize.io:443"},
-    ],
-)
-def test_no_usable_server_leaves_the_provider_unavailable_and_inert(hermes_env, monkeypatch, config):
-    if config is not None:
-        (hermes_env / "hindsight").mkdir(parents=True, exist_ok=True)
-        (hermes_env / "hindsight" / "config.json").write_text(json.dumps(config))
-    instance = plugin.HindsightMemoryProvider()
-    built = []
-    monkeypatch.setattr(instance, "_new_api_client", lambda: built.append(1))
-    assert instance.is_available() is False
-    assert instance.unavailable_reason()
-    instance.initialize("session-1")
-    assert instance._mode == "disabled"
-    instance.sync_turn("what we decided", "the answer")
-    instance.shutdown()
-    assert built == []
+@pytest.mark.parametrize("mode", ["cloud", "local_external"])
+def test_a_client_that_cannot_import_makes_the_provider_unavailable(hermes_env, monkeypatch, mode):
+    """#6063: a gateway started before the install has no hindsight_client. The provider said it was
+    available and every recall and retain then failed; it now says why it isn't."""
+    (hermes_env / "hindsight").mkdir(parents=True, exist_ok=True)
+    (hermes_env / "hindsight" / "config.json").write_text(json.dumps({"mode": mode, "api_url": "http://hs.test"}))
+    provider = plugin.HindsightMemoryProvider()
+    assert provider.is_available() is True and provider.unavailable_reason() == ""
 
+    def _missing(name):
+        raise ModuleNotFoundError(f"No module named '{name}'")
 
-def test_a_vendor_host_in_the_environment_is_refused(hermes_env):
-    SECRETS["HINDSIGHT_API_URL"] = "https://api.hindsight.vectorize.io"
-    assert plugin.HindsightMemoryProvider().is_available() is False
-
-
-@pytest.mark.parametrize("url", ["https://notvectorize.io", "https://vectorize.io.home.arpa", "http://10.0.0.5:8888"])
-def test_only_the_vendor_host_is_refused(hermes_env, url):
-    SECRETS["HINDSIGHT_API_URL"] = url
-    assert plugin.HindsightMemoryProvider().is_available() is True
-
-
-@pytest.mark.parametrize("source", ["config", "env"])
-def test_a_named_server_makes_the_provider_available_in_local_external(hermes_env, source):
-    if source == "config":
-        (hermes_env / "hindsight").mkdir(parents=True, exist_ok=True)
-        (hermes_env / "hindsight" / "config.json").write_text(json.dumps({"api_url": "http://server.test"}))
-    else:
-        SECRETS["HINDSIGHT_API_URL"] = "http://server.test"
-    assert plugin.HindsightMemoryProvider().is_available() is True
-
-
-def test_setup_fetches_no_template_catalog_unless_one_is_named(hermes_env, monkeypatch):
-    import urllib.request
-
-    from hindsight_hermes import templates
-
-    def refuse(*args, **kwargs):
-        raise AssertionError("setup reached the network")
-
-    monkeypatch.setattr(urllib.request, "urlopen", refuse)
-    picker = []
-    result = templates.run_template_step(
-        api_url="http://server.test",
-        bank_id="hermes",
-        api_key=None,
-        select=lambda *a, **k: picker.append(1),
-        cancelled=-1,
-    )
-    assert result is None
-    assert picker == []
+    monkeypatch.setattr(plugin.embedded.importlib, "import_module", _missing)
+    assert provider.is_available() is False
+    assert "hermes gateway restart" in provider.unavailable_reason()
 
 
 def test_desktop_panel_offers_every_mode_the_plugin_runs():
@@ -831,7 +809,7 @@ def test_desktop_panel_offers_every_mode_the_plugin_runs():
     from hindsight_hermes.config_schema import CONFIG_SCHEMA
 
     mode = next(field for field in CONFIG_SCHEMA["fields"] if field["key"] == "mode")
-    assert {option[0] for option in mode["options"]} == {"local_embedded", "local_external"}
+    assert {option[0] for option in mode["options"]} == {"cloud", "local_embedded", "local_external"}
 
 
 def test_cron_runs_are_not_auto_retained(provider):
@@ -851,12 +829,12 @@ def test_retain_cron_opts_cron_runs_back_in(provider):
 
 
 @pytest.mark.parametrize("agent_context", ["subagent", "kanban"])
-def test_subagent_and_kanban_capture_remains_eligible(provider, agent_context):
-    """Owned distribution preserves installed helper capture during project rollout."""
+def test_subagent_and_kanban_runs_are_not_auto_retained(provider, agent_context):
+    """#5555: delegated children and kanban workers would fill the bank with task chatter."""
     child, fake = provider({}, agent_context=agent_context)
     child.sync_turn("work kanban task t_1", "done")
     child.shutdown()
-    assert len(fake.retains) == 1
+    assert fake.retains == []
 
 
 def test_a_kanban_worker_is_recognised_from_the_env(provider, monkeypatch):
@@ -865,8 +843,7 @@ def test_a_kanban_worker_is_recognised_from_the_env(provider, monkeypatch):
     worker, fake = provider({}, agent_context="primary")
     worker.sync_turn("work kanban task t_1", "done")
     worker.shutdown()
-    assert worker._agent_context == "kanban"
-    assert len(fake.retains) == 1
+    assert fake.retains == []
 
 
 def test_a_late_prefetch_for_a_previous_session_is_ignored(provider, monkeypatch):
@@ -880,6 +857,71 @@ def test_a_late_prefetch_for_a_previous_session_is_ignored(provider, monkeypatch
     instance._prefetch_thread.join(5)
     instance.shutdown()
     assert calls == ["new query"]
+
+
+# Homelab-Memory#65: the end-of-turn recall that queue_prefetch starts is for the *next* turn. A
+# one-shot run has none, shutdown() waits 5 s for it and then closes the connection, and the
+# server cancels a recall nobody reads (HTTP 499, ~half of all recalls).
+@pytest.mark.parametrize("agent_context", ["kanban", "subagent", "cron"])
+def test_a_one_shot_run_starts_no_end_of_turn_recall(provider, agent_context):
+    instance, fake = provider({}, client=FakeClient(recall_texts=["fact one"]), agent_context=agent_context)
+    instance.queue_prefetch("q", session_id="session-1")
+    if instance._prefetch_thread is not None:
+        instance._prefetch_thread.join(5)
+    assert fake.recalls == []
+    assert instance.prefetch("next") == ""  # nothing was primed, and nothing waits for it
+    instance.shutdown()
+    assert fake.recalls == []
+
+
+def test_a_kanban_worker_recognised_from_the_env_starts_no_end_of_turn_recall(provider, monkeypatch):
+    """Hermes starts kanban workers as "primary" CLI runs and marks them only in the env (#5555)."""
+    monkeypatch.setenv("HERMES_KANBAN_TASK", "t_1")
+    worker, fake = provider({}, agent_context="primary")
+    assert worker._agent_context == "kanban"
+    worker.queue_prefetch("q", session_id="session-1")
+    if worker._prefetch_thread is not None:
+        worker._prefetch_thread.join(5)
+    worker.shutdown()
+    assert fake.recalls == []
+
+
+def test_a_live_chat_still_queues_the_end_of_turn_recall(provider):
+    primary, fake = provider({}, client=FakeClient(recall_texts=["fact one"]), agent_context="primary")
+    primary.queue_prefetch("q", session_id="session-1")
+    primary._prefetch_thread.join(5)
+    assert len(fake.recalls) == 1
+    assert "- fact one" in primary.prefetch("next")
+    primary.shutdown()
+    assert len(fake.recalls) == 1
+
+
+def test_shutdown_with_a_recall_in_flight_returns_within_its_bound(provider):
+    """The 5 s join in shutdown() stays a bound: a stuck recall must not hold the process or raise."""
+    started, release = threading.Event(), threading.Event()
+
+    class StuckRecall(FakeClient):
+        async def arecall(self, **kwargs):
+            started.set()
+            while not release.is_set():
+                await asyncio.sleep(0.01)
+            return FakeRecallResponse(["late memory"])
+
+    instance, _ = provider({}, client=StuckRecall(), agent_context="primary")
+    worker = None
+    try:
+        instance.queue_prefetch("q", session_id="session-1")
+        worker = instance._prefetch_thread
+        assert started.wait(5), "the recall never started"
+        began = time.monotonic()
+        instance.shutdown()  # must not raise
+        elapsed = time.monotonic() - began
+        assert 4.5 <= elapsed < 8, f"shutdown took {elapsed:.1f}s; the join bound is 5 s"
+        assert instance._client is None
+    finally:
+        release.set()
+        if worker is not None:
+            worker.join(5)
 
 
 def test_plugin_version_reads_plugin_yaml_as_utf8(monkeypatch):
@@ -948,3 +990,51 @@ def test_explicit_observation_scopes_win_over_the_default(provider):
     instance.sync_turn("hi", "hello")
     instance.shutdown()
     assert _retain_item(fake)["observation_scopes"] == "combined"
+
+
+class _StaleOnceClient(FakeClient):
+    """The first call of each kind hits a pooled connection the server closed while it sat idle."""
+
+    def __init__(self):
+        super().__init__(recall_texts=["Ada likes tea"])
+        self.failed: set[str] = set()
+
+    def _stale_once(self, kind: str) -> None:
+        import aiohttp
+
+        if kind not in self.failed:
+            self.failed.add(kind)
+            raise aiohttp.ServerDisconnectedError()
+
+    async def arecall(self, **kwargs):
+        self._stale_once("recall")
+        return await super().arecall(**kwargs)
+
+    async def aretain_batch(self, **kwargs):
+        self._stale_once("retain")
+        return await super().aretain_batch(**kwargs)
+
+
+def test_a_stale_keepalive_connection_is_retried_for_a_recall(provider):
+    """#5734: outside local_embedded a dropped idle connection failed the turn's recall outright."""
+    instance, fake = provider({}, client=_StaleOnceClient())
+    result = json.loads(instance.handle_tool_call("hindsight_recall", {"query": "tea?"}))
+    assert "Ada likes tea" in result["result"]
+    assert len(fake.recalls) == 1
+
+
+def test_a_sync_retain_is_not_resent_after_a_dropped_connection(provider):
+    """The server may have stored a retain it dropped mid-way; without an operation id to replay
+    under, resending it would store it twice."""
+    instance, fake = provider({"retain_async": False}, client=_StaleOnceClient())
+    result = instance.handle_tool_call("hindsight_retain", {"content": "Ada likes tea"})
+    assert "Server disconnected" in result
+    assert fake.retains == []
+    instance.shutdown()
+
+
+def test_an_async_turn_retain_is_resent_under_its_operation_id(provider):
+    instance, fake = provider({}, client=_StaleOnceClient())
+    instance.sync_turn("one", "1")
+    instance.shutdown()
+    assert len(fake.retains) == 1 and fake.retains[0]["operation_id"]

@@ -18,9 +18,10 @@ CONFIG_SCHEMA = ProviderConfigSchema(
             key="mode",
             label="Mode",
             kind=KIND_SELECT,
-            default="local_external",
+            default="cloud",
             description="How Hermes connects to Hindsight.",
             options=(
+                ProviderFieldOption("cloud", "Cloud", "Hindsight Cloud API (lightweight, just needs an API key)"),
                 ProviderFieldOption("local_external", "Local External", "Connect to an existing Hindsight instance"),
                 # Without it the panel can't show a local_embedded config, and saving it rewrote the mode.
                 ProviderFieldOption("local_embedded", "Local Embedded", "Run a local Hindsight daemon on this machine"),
@@ -40,7 +41,7 @@ CONFIG_SCHEMA = ProviderConfigSchema(
             key="api_url",
             label="API URL",
             kind=KIND_TEXT,
-            default="",
+            default="https://api.hindsight.vectorize.io",
             aliases=("apiUrl",),
             env_fallbacks=("HINDSIGHT_API_URL",),
             inline=True,

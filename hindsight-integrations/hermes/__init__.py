@@ -1,5 +1,5 @@
 """Hindsight memory plugin — MemoryProvider with knowledge graph, entity resolution
-and multi-strategy retrieval; local_external (a server you run) or local_embedded.
+and multi-strategy retrieval; cloud (API key), local_external, or local_embedded.
 
 Config: $HERMES_HOME/hindsight/config.json (profile-scoped), else ~/.hindsight/
 config.json (legacy, shared), else env: HINDSIGHT_API_KEY / BANK_ID / BUDGET /
@@ -35,6 +35,7 @@ from tools.registry import tool_error
 from utils import read_json_or_empty
 
 from .embedded import (
+    _CLIENT_MODULES,
     _RETRIABLE_CONNECTION_MARKERS,
     _build_embedded_profile_env,
     _check_local_runtime,
@@ -51,9 +52,10 @@ from .embedded import (
     _start_daemon,
     _stop_daemon,
 )
-from .project_memory import CaptureStamp, ProjectMemoryDenied, capture_stamp
 from .settings import (
+    _DEFAULT_API_URL,
     _DEFAULT_IDLE_TIMEOUT,
+    _DEFAULT_LOCAL_URL,
     _DEFAULT_OBSERVATION_SCOPES,
     _DEFAULT_RETAIN_SOURCE,
     _DEFAULT_RETAIN_STRATEGY,
@@ -66,7 +68,6 @@ from .settings import (
     _clears_min_scores,
     _daemon_llm_provider,
     _discover_cwd_bank_id,
-    _is_vendor_hosted,
     _normalize_min_scores,
     _normalize_observation_scopes,
     _normalize_string_list,
@@ -81,7 +82,6 @@ from .settings import (
 logger = logging.getLogger(__name__)
 
 _LOCAL_MODES = {"local", "local_embedded"}
-_DEFAULT_MODE = "local_external"
 # Share of the operation timeout an extra recall bank may use, so a slow extra bank
 # always gives up before the operation that also carries the primary's result does.
 _EXTRA_BANK_TIMEOUT_SHARE = 0.8
@@ -89,6 +89,8 @@ _EXTRA_BANK_TIMEOUT_SHARE = 0.8
 # unreachable bank costs one timeout per cooldown instead of one on every turn.
 _EXTRA_BANK_COOLDOWN = 300.0
 _RETAIN_CONTEXT_DEFAULT = "conversation between Hermes Agent and the User"
+# Runs that end after one task: no next turn exists to use a recall queued at the end of this one.
+_ONE_SHOT_CONTEXTS = frozenset({"kanban", "subagent", "cron"})
 
 
 def _plugin_version() -> str:
@@ -138,18 +140,8 @@ def _scoped_flag(name: str, default: bool) -> bool:
     return default if not value else value in {"true", "1", "yes", "on"}
 
 
-def _configured_api_key(config: dict) -> str:
+def _cloud_api_key(config: dict) -> str:
     return config.get("apiKey") or config.get("api_key") or get_secret("HINDSIGHT_API_KEY", "")
-
-
-def _configured_api_url(config: dict) -> str:
-    """The server this config names, or "". There is no default host, and the vendor's hosted
-    service is refused: no usable URL, no provider."""
-    url = config.get("api_url") or config.get("apiUrl") or get_secret("HINDSIGHT_API_URL", "") or ""
-    if _is_vendor_hosted(url):
-        logger.warning("Hindsight refuses %s: this build talks only to servers you run", url)
-        return ""
-    return url
 
 
 def _warn_if_client_outdated() -> None:
@@ -202,6 +194,8 @@ def _fetch_hindsight_api_version(api_url: str, api_key: str | None = None, timeo
 
     ``/v1/version`` first: an ingress that routes only ``/v1`` to the API hands a bare ``/version``
     to whatever else it fronts, whose 404 read as "no version" (same order as coding-agents, #5286).
+    ``/api/version`` last: a proxy that fronts the control plane at the root answers there with the
+    API's own version, which it relays (#6137).
     Raises ``_VersionProbeUnreachable`` when no version came back and either path failed to answer
     (connection error, timeout, 5xx), so the caller can tell "unknown" from "old": only a 4xx or a
     versionless body from every path means the server is old.
@@ -215,7 +209,7 @@ def _fetch_hindsight_api_version(api_url: str, api_key: str | None = None, timeo
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     unanswered = False
-    for path in ("/v1/version", "/version"):
+    for path in ("/v1/version", "/version", "/api/version"):
         url = api_url.rstrip("/") + path
         try:
             with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout) as resp:  # noqa: S310
@@ -319,9 +313,7 @@ class _QueuedRetain:
 
 
 def _retain_error_is_permanent(exc: BaseException) -> bool:
-    """Policy denials and non-retryable 4xx must not hold permitted successors."""
-    if isinstance(exc, ProjectMemoryDenied):
-        return True
+    """A 4xx other than timeout/rate limit: the same request fails the same way every time."""
     status = getattr(exc, "status", None)
     return isinstance(status, int) and 400 <= status < 500 and status not in (408, 429)
 
@@ -434,7 +426,7 @@ def _load_config() -> dict:
     # the key beside them: read through the secret scope so a multiplexed secondary never inherits
     # the default profile's bank/mode. Tuning knobs (timeouts, budget) stay process-global.
     return {
-        "mode": get_secret("HINDSIGHT_MODE", "") or _DEFAULT_MODE,
+        "mode": get_secret("HINDSIGHT_MODE", "") or "cloud",
         "apiKey": get_secret("HINDSIGHT_API_KEY", ""),
         "timeout": _parse_int_setting(os.environ.get("HINDSIGHT_TIMEOUT"), _DEFAULT_TIMEOUT),
         "idle_timeout": _parse_int_setting(os.environ.get("HINDSIGHT_IDLE_TIMEOUT"), _DEFAULT_IDLE_TIMEOUT),
@@ -486,6 +478,8 @@ _SESSION_KWARGS = (
     "agent_workspace",
     "cwd",
 )
+# aiohttp's message for a pooled keep-alive connection the server closed while it sat idle.
+_STALE_KEEPALIVE_MARKER = "server disconnected"
 # Retain metadata keys, each stamped from the attribute of the same name when set.
 _METADATA_ATTRS = (
     "session_id",
@@ -498,6 +492,8 @@ _METADATA_ATTRS = (
     "thread_id",
     "agent_identity",
 )
+# Retain metadata that differs on every call; left off appends to a session document (#6241).
+_PER_CALL_METADATA = frozenset({"retained_at", "message_count", "turn_index"})
 # Naming Hermes' built-in session_search tells the model when to pick each tool. With only
 # the tool names listed, models defaulted to session_search (raw transcripts) for every
 # history question and skipped Hindsight's deduplicated memories.
@@ -534,7 +530,7 @@ class HindsightMemoryProvider(MemoryProvider):
         self._config = self._api_key = self._client = None
         self._embedded_url = None
         self._client_lock = threading.Lock()
-        self._api_url, self._mode = "", _DEFAULT_MODE
+        self._api_url, self._mode = _DEFAULT_API_URL, "cloud"
         self._timeout, self._idle_timeout = _DEFAULT_TIMEOUT, _DEFAULT_IDLE_TIMEOUT
         self._bank_id, self._budget, self._bank_id_template = "hermes", "mid", ""
         self._bank_mission, self._bank_retain_mission = "", None
@@ -607,38 +603,36 @@ class HindsightMemoryProvider(MemoryProvider):
     def is_available(self) -> bool:
         try:
             cfg = _load_config()
-            mode = cfg.get("mode", _DEFAULT_MODE)
+            mode = cfg.get("mode", "cloud")
             if mode in _LOCAL_MODES:
                 # The availability gate is the only place worth self-healing from: agent_init drops
                 # the provider outright when this returns False, and every other runtime probe below
                 # runs after it has already passed.
                 return _check_local_runtime().available
-            return mode == "local_external" and bool(_configured_api_url(cfg))
+            # Hermes keeps a provider whose client cannot import and lets every recall and retain
+            # fail; a gateway started before the install runs without it (#6063).
+            if not _check_local_runtime(_CLIENT_MODULES).available:
+                return False
+            return mode == "local_external" or bool(
+                _cloud_api_key(cfg) or cfg.get("api_url") or get_secret("HINDSIGHT_API_URL", "")
+            )
         except Exception:
             logger.debug("Hindsight availability check failed", exc_info=True)
             return False
 
     def unavailable_reason(self) -> str:
-        """Why the provider is unavailable: a missing URL or retired mode, or the install hint for
-        a local_embedded runtime (is_available() gates initialize() out, so the hint it would log
-        never fires; agent_init shows this).
+        """Install hint when this process can't import what the mode needs (is_available() gates
+        initialize() out, so the hint it would log never fires; agent_init shows this).
 
         ``is_available()`` returns False for local modes when the embedded runtime can't be imported, so
         ``initialize()`` — and the hint it would log — is never reached (#7718). Surface the install
         guidance here, where agent_init warns about an unavailable provider.
         """
         try:
-            cfg = _load_config()
-            mode = cfg.get("mode", _DEFAULT_MODE)
-            if mode not in _LOCAL_MODES:
-                if mode != "local_external":
-                    return f"Hindsight mode {mode!r} is not supported. Use local_external or local_embedded."
-                if not _configured_api_url(cfg):
-                    return "Hindsight has no usable server URL. Set api_url or HINDSIGHT_API_URL to a server you run."
-                return ""
+            local = _load_config().get("mode", "cloud") in _LOCAL_MODES
         except Exception:
             return ""
-        status = _check_local_runtime()
+        status = _check_local_runtime() if local else _check_local_runtime(_CLIENT_MODULES)
         return "" if status.available else _local_runtime_hint(status.reason).strip()
 
     def save_config(self, values, hermes_home):
@@ -659,14 +653,29 @@ class HindsightMemoryProvider(MemoryProvider):
             {
                 "key": "mode",
                 "description": "Connection mode",
-                "default": _DEFAULT_MODE,
-                "choices": ["local_external", "local_embedded"],
+                "default": "cloud",
+                "choices": ["cloud", "local_embedded", "local_external"],
+            },
+            # Cloud mode
+            {
+                "key": "api_url",
+                "description": "Hindsight Cloud API URL",
+                "default": _DEFAULT_API_URL,
+                "when": {"mode": "cloud"},
+            },
+            {
+                "key": "api_key",
+                "description": "Hindsight Cloud API key",
+                "secret": True,
+                "env_var": "HINDSIGHT_API_KEY",
+                "url": "https://ui.hindsight.vectorize.io",
+                "when": {"mode": "cloud"},
             },
             # Local external mode
             {
                 "key": "api_url",
-                "description": "Hindsight API URL (required)",
-                "default": "",
+                "description": "Hindsight API URL",
+                "default": _DEFAULT_LOCAL_URL,
                 "when": {"mode": "local_external"},
             },
             {
@@ -926,7 +935,7 @@ class HindsightMemoryProvider(MemoryProvider):
         api_key = _load_simple_env(_embedded_profile_env_path(cfg)).get("HINDSIGHT_API_TENANT_API_KEY") or self._api_key
         return Hindsight(base_url=self._embedded_url, api_key=api_key or None)
 
-    def _new_api_client(self):
+    def _new_cloud_client(self):
         from hindsight_client import Hindsight
 
         kwargs = {
@@ -937,7 +946,7 @@ class HindsightMemoryProvider(MemoryProvider):
         if self._api_key:
             kwargs["api_key"] = self._api_key
         logger.debug(
-            "Creating Hindsight API client (url=%s, has_key=%s, timeout=%s)",
+            "Creating Hindsight cloud client (url=%s, has_key=%s, timeout=%s)",
             self._api_url,
             bool(self._api_key),
             kwargs["timeout"],
@@ -984,27 +993,29 @@ class HindsightMemoryProvider(MemoryProvider):
         the guarded section never awaits.
         """
         with self._client_lock:
-            if self._mode == "disabled":
-                # Reachable only by a host that keeps a provider is_available() refused.
-                raise RuntimeError("Hindsight is disabled: no usable server")
             if self._client is None:
-                self._client = self._new_embedded_client() if self._mode == "local_embedded" else self._new_api_client()
+                self._client = (
+                    self._new_embedded_client() if self._mode == "local_embedded" else self._new_cloud_client()
+                )
             return self._client
 
     def _run_sync(self, coro):
         """Schedule *coro* on the shared loop using the configured timeout."""
         return _run_sync(coro, timeout=self._timeout)
 
-    def _run_hindsight_operation(self, operation):
-        """Run an async client operation; for local_embedded, a stale-daemon
-        connection failure recreates the client and retries once."""
+    def _run_hindsight_operation(self, operation, *, repeatable: bool = True):
+        """Run an async client operation, recreating the client and retrying once when its
+        connection went stale: for local_embedded, a daemon that is no longer there; in any mode,
+        a pooled connection the server already closed (#5734). The server may have read a request
+        it dropped mid-way, so that retry is only for a *repeatable* operation."""
         try:
             return self._run_sync(operation(self._get_client()))
         except Exception as exc:
             text = f"{type(exc).__name__}: {exc}".lower()
-            if self._mode != "local_embedded" or not any(m in text for m in _RETRIABLE_CONNECTION_MARKERS):
+            stale_daemon = self._mode == "local_embedded" and any(m in text for m in _RETRIABLE_CONNECTION_MARKERS)
+            if not stale_daemon and not (repeatable and _STALE_KEEPALIVE_MARKER in text):
                 raise
-            logger.info("Hindsight embedded daemon appears unreachable; recreating client and retrying once: %s", exc)
+            logger.info("Hindsight connection went stale; recreating client and retrying once: %s", exc)
             with self._client_lock:
                 stale, self._client = self._client, None
             if stale is not None:
@@ -1296,7 +1307,7 @@ class HindsightMemoryProvider(MemoryProvider):
             setattr(self, f"_{name}", str(kwargs.get(name) or "").strip())
         self._turn_index = self._last_retained_turn_count = 0
         self._session_turns = []
-        self._mode = cfg.get("mode", _DEFAULT_MODE)
+        self._mode = cfg.get("mode", "cloud")
         self._timeout = self._int_setting("timeout", "HINDSIGHT_TIMEOUT", _DEFAULT_TIMEOUT)
         self._idle_timeout = self._int_setting("idle_timeout", "HINDSIGHT_IDLE_TIMEOUT", _DEFAULT_IDLE_TIMEOUT)
         if self._mode == "local":  # legacy alias
@@ -1313,11 +1324,6 @@ class HindsightMemoryProvider(MemoryProvider):
                 )
                 self._mode = "disabled"
                 return
-        elif self._mode != "local_external" or not _configured_api_url(cfg):
-            # is_available() normally stops this first; nothing may build a client without a server.
-            logger.warning("Hindsight disabled: %s", self.unavailable_reason() or "no usable server")
-            self._mode = "disabled"
-            return
         self._apply_connection_settings(cfg)
         self._apply_retain_settings(cfg)
         self._apply_recall_settings(cfg)
@@ -1452,8 +1458,9 @@ class HindsightMemoryProvider(MemoryProvider):
 
     def _apply_connection_settings(self, cfg: dict) -> None:
         """Endpoint, bank and mode selectors from *cfg* (env fallbacks where documented)."""
-        self._api_key = _configured_api_key(cfg)
-        self._api_url = _configured_api_url(cfg)
+        self._api_key = _cloud_api_key(cfg)
+        default_url = _DEFAULT_LOCAL_URL if self._mode in {"local_embedded", "local_external"} else _DEFAULT_API_URL
+        self._api_url = cfg.get("api_url") or get_secret("HINDSIGHT_API_URL", "") or default_url
 
         banks = cfg_get(cfg, "banks", "hermes", default={})
         self._bank_id_template = cfg.get("bank_id_template", "") or ""
@@ -1533,10 +1540,10 @@ class HindsightMemoryProvider(MemoryProvider):
 
     def _apply_retain_policy(self, cfg: dict) -> None:
         """Pure-config retain knobs (no env/secret reads; ``{}`` yields the defaults)."""
-        # Owned capture policy preserves installed helper eligibility. Scheduled
-        # runs remain opt-in; changing project attribution must not disable helpers.
+        # Hermes' provider contract: skip automatic writes for non-primary runs (#5555). retain_cron opts
+        # scheduled runs back in; sub-agents and kanban workers report to a parent that retains its own turns.
         context = getattr(self, "_agent_context", "primary")
-        skip = context == "cron" and not cfg.get("retain_cron", False)
+        skip = context in ("subagent", "kanban") or (context == "cron" and not cfg.get("retain_cron", False))
         self._auto_retain = bool(cfg.get("auto_retain", True)) and not skip
         self._retain_every_n_turns = max(1, _parse_int_setting(cfg.get("retain_every_n_turns"), 1))
         self._retain_context = cfg.get("retain_context", _RETAIN_CONTEXT_DEFAULT)
@@ -1586,7 +1593,7 @@ class HindsightMemoryProvider(MemoryProvider):
                 "Hindsight local_embedded mode cannot run as root "
                 "(PostgreSQL initdb refuses root). Skipping the embedded "
                 "memory daemon. Run Hermes as a non-root user, or switch "
-                "to local_external mode via 'hermes memory setup'."
+                "to cloud / local_external mode via 'hermes memory setup'."
             )
             logger.warning(msg)
             # Surface to the terminal too — a daemon that never starts would otherwise fail silently and
@@ -1816,6 +1823,11 @@ class HindsightMemoryProvider(MemoryProvider):
         # Sync mode recalls live each turn — nothing to prime in the background.
         if self._recall_sync or self._recall_disabled():
             return
+        # The recall queued after a finished turn serves the *next* turn. A one-shot run has none: the
+        # process ends, shutdown() waits 5 s and closes the connection, and the server cancels a recall
+        # nobody reads (Homelab-Memory#65). The hindsight_recall tool still works in these runs.
+        if getattr(self, "_agent_context", "primary") in _ONE_SHOT_CONTEXTS:
+            return
         # A late call for a session we already left must not prime (or bump the generation of) this one (#5628).
         if session_id and session_id != self._session_id:
             return
@@ -1862,39 +1874,6 @@ class HindsightMemoryProvider(MemoryProvider):
         metadata.update({name: value for name in _METADATA_ATTRS if (value := getattr(self, f"_{name}"))})
         return metadata
 
-    def _project_memory_mode(self) -> bool:
-        return "project_memory" in (self._config or {}) or (
-            isinstance(self._observation_scopes, list)
-            and any("project:*" in scope for scope in self._observation_scopes)
-        )
-
-    def _project_memory_stamp(self, cwd: str | None = None) -> CaptureStamp | None:
-        if not self._project_memory_mode():
-            return None  # Preserve native legacy/shared behavior, including literal tags.
-        policy = (self._config or {}).get("project_memory")
-        stamp = capture_stamp(policy, self._cwd if cwd is None else cwd)
-        if (
-            self._write_bank_ids != [policy["bank_id"]]
-            or self._observation_scopes != [["project:*"]]
-            or self._bank_id_template
-            or self._config.get("trusted_project_dirs")
-        ):
-            raise ProjectMemoryDenied("Project memory write blocked: routing does not match binding.")
-        return stamp
-
-    def _retain_origin_cwd(self) -> str:
-        if self._project_memory_mode() and self._cwd:
-            return str(Path(self._cwd).expanduser().resolve())
-        return self._cwd
-
-    def _project_memory_allowed(self) -> bool:
-        try:
-            self._project_memory_stamp()
-            return True
-        except ValueError:
-            logger.warning("Project memory write blocked: review writer binding and exclusions.")
-            return False
-
     def _build_retain_kwargs(
         self,
         content: str,
@@ -1915,13 +1894,6 @@ class HindsightMemoryProvider(MemoryProvider):
             "timestamp": (occurred_at or "").strip() or _event_timestamp(),
         }
         merged_tags = _normalize_string_list(list(self._retain_tags) + _normalize_string_list(tags))
-        stamp = self._project_memory_stamp()
-        if stamp is not None:
-            # Preserve manual tags; refuse a second project rather than rewriting it.
-            if any(tag.startswith("project:") and tag != stamp.tag for tag in merged_tags):
-                raise ProjectMemoryDenied("Project memory write blocked: conflicting project tag.")
-            merged_tags = _normalize_string_list(merged_tags + [stamp.tag])
-            item["metadata"] = {**item["metadata"], **stamp.metadata}
         item.update({k: v for k, v in (("context", context), ("update_mode", update_mode)) if v is not None})
         item.update({k: v for k, v in (("tags", merged_tags), ("observation_scopes", self._observation_scopes)) if v})
         # Per-item strategy: overrides the bank default for this item only. Omitted when
@@ -1938,23 +1910,9 @@ class HindsightMemoryProvider(MemoryProvider):
         document_id: str | None = None,
         retain_async: bool | None = None,
         operation_id: str | None = None,
-        origin_cwd: str | None = None,
-        project_required: bool = False,
     ):
         """Dispatch one item via aretain_batch (bank_id/document_id/retain_async/operation_id
         are call-level args, never item keys). *operation_id* only applies to async retains."""
-        # Local-only origin is frozen by every producer; never attach it to the payload.
-        stamp = self._project_memory_stamp(origin_cwd)
-        if project_required and stamp is None:
-            raise ProjectMemoryDenied("Project memory write blocked: required project binding removed.")
-        if stamp is not None:
-            if (
-                bank_id != self._config["project_memory"]["bank_id"]
-                or item.get("observation_scopes") != [["project:*"]]
-                or [tag for tag in item.get("tags", []) if tag.startswith("project:")] != [stamp.tag]
-                or any(item.get("metadata", {}).get(key) != value for key, value in stamp.metadata.items())
-            ):
-                raise ProjectMemoryDenied("Project memory write blocked: queued attribution changed.")
         kwargs: Dict[str, Any] = {
             "bank_id": bank_id,
             "items": [item],
@@ -1963,7 +1921,10 @@ class HindsightMemoryProvider(MemoryProvider):
             "operation_id": operation_id if retain_async else None,
         }
         kwargs = {k: v for k, v in kwargs.items() if v is not None}
-        return self._run_hindsight_operation(lambda client: client.aretain_batch(**kwargs))
+        # A retain is only safe to resend under its operation id, which the server replays.
+        return self._run_hindsight_operation(
+            lambda client: client.aretain_batch(**kwargs), repeatable="operation_id" in kwargs
+        )
 
     def _make_turn_retain_job(
         self, turns: list[str], *, document_id: str, update_mode: str | None, label: str, track_ops: bool = True
@@ -1974,6 +1935,10 @@ class HindsightMemoryProvider(MemoryProvider):
         # when the document is a list of messages, not a list of per-turn lists.
         content = json.dumps([message for turn in turns for message in json.loads(turn)], ensure_ascii=False)
         metadata = self._build_metadata(message_count=len(turns) * 2, turn_index=self._turn_index)
+        if update_mode == "append":
+            # An append sets the document's metadata on every memory the session already has, so a
+            # value that changes per call would rewrite all of them on each turn (#6241).
+            metadata = {k: v for k, v in metadata.items() if k not in _PER_CALL_METADATA}
         occurred_at = _event_timestamp()
         # A session named as its own parent (in-place compaction) is no lineage; tagging it
         # would flip the document's tag set and re-consolidate it from scratch.
@@ -1988,18 +1953,16 @@ class HindsightMemoryProvider(MemoryProvider):
         # Where these turns go when the bank refuses append (#5599); fixed so a resend reuses it.
         own_document_id = f"{document_id}-{uuid.uuid4().hex[:12]}"
 
-        origin_cwd = self._retain_origin_cwd()
-        project_required = self._project_memory_mode()
-        item = self._build_retain_kwargs(
-            content,
-            context=retain_context,
-            metadata=metadata,
-            tags=tags,
-            occurred_at=occurred_at,
-            update_mode=update_mode,
-        )
-
         def _job() -> None:
+            item = self._build_retain_kwargs(
+                content,
+                context=retain_context,
+                metadata=metadata,
+                tags=tags,
+                occurred_at=occurred_at,
+                update_mode=update_mode,
+            )
+
             def _write(bank_id: str) -> None:
                 logger.debug(
                     "Hindsight %s: bank=%s, doc=%s, mode=%s, async=%s, content_len=%d, num_turns=%d",
@@ -2019,8 +1982,6 @@ class HindsightMemoryProvider(MemoryProvider):
                         document_id=target_document_id,
                         retain_async=retain_async,
                         operation_id=operation_ids[bank_id],
-                        origin_cwd=origin_cwd,
-                        project_required=project_required,
                     )
 
                 try:
@@ -2062,8 +2023,6 @@ class HindsightMemoryProvider(MemoryProvider):
         )
         if why:
             logger.debug("sync_turn: skipped (%s)", why)
-            return
-        if not self._project_memory_allowed():
             return
         if session_id:
             self._session_id = str(session_id).strip()
@@ -2125,10 +2084,6 @@ class HindsightMemoryProvider(MemoryProvider):
         Removals are not retained."""
         if action not in ("add", "replace") or not content or self._shutting_down.is_set():
             return
-        if not self._project_memory_allowed():
-            return
-        origin_cwd = self._retain_origin_cwd()
-        project_required = self._project_memory_mode()
         item = self._build_retain_kwargs(
             content,
             context=f"Hermes built-in {target} memory entry",
@@ -2139,12 +2094,7 @@ class HindsightMemoryProvider(MemoryProvider):
 
         def _write(bank_id: str) -> None:
             resp = self._retain_batch(
-                item,
-                bank_id=bank_id,
-                retain_async=retain_async,
-                operation_id=operation_ids[bank_id],
-                origin_cwd=origin_cwd,
-                project_required=project_required,
+                item, bank_id=bank_id, retain_async=retain_async, operation_id=operation_ids[bank_id]
             )
             if retain_async:
                 self._track_retain_ops(resp, bank_id, wait=False)
@@ -2164,8 +2114,6 @@ class HindsightMemoryProvider(MemoryProvider):
 
     def _tool_retain(self, args: dict) -> str:
         content, context = args["content"], args.get("context")
-        origin_cwd = self._retain_origin_cwd()
-        project_required = self._project_memory_mode()
         item = self._build_retain_kwargs(
             content, context=context, tags=args.get("tags"), occurred_at=args.get("occurred_at")
         )
@@ -2177,13 +2125,7 @@ class HindsightMemoryProvider(MemoryProvider):
                 len(content),
                 context,
             )
-            resp = self._retain_batch(
-                item,
-                bank_id=bank_id,
-                retain_async=self._retain_async,
-                origin_cwd=origin_cwd,
-                project_required=project_required,
-            )
+            resp = self._retain_batch(item, bank_id=bank_id, retain_async=self._retain_async)
             if self._retain_async:
                 self._track_retain_ops(resp, bank_id)
 
@@ -2278,10 +2220,6 @@ class HindsightMemoryProvider(MemoryProvider):
         # 3. Rotate to the new session.
         if parent_session_id:
             self._parent_session_id = str(parent_session_id).strip()
-        # An ordinary switch retains its established launch origin. A supplied
-        # origin (including empty/unknown) applies only after the old buffer is queued.
-        if self._project_memory_mode() and "cwd" in kwargs:
-            self._cwd = str(kwargs.get("cwd") or "").strip()
         self._session_id, self._document_id = new_id, _mint_document_id(new_id)
         # A {session} bank template names a bank per session: follow the switch.
         if self._bank_source == "template" and "session" in _template_fields(self._bank_id_template):

@@ -140,6 +140,8 @@ def hermes_env(tmp_path, monkeypatch):
     for var in list(__import__("os").environ):
         if var.startswith("HINDSIGHT_"):
             monkeypatch.delenv(var, raising=False)
+    # A kanban worker running the suite has this set, and the provider reads it as agent_context.
+    monkeypatch.delenv("HERMES_KANBAN_TASK", raising=False)
     yield tmp_path
     SECRETS.clear()
 
@@ -202,21 +204,17 @@ class FakeClient:
 
 @pytest.fixture
 def provider(hermes_env, monkeypatch):
-    """An initialized local_external provider wired to a FakeClient."""
+    """An initialized cloud-mode provider wired to a FakeClient."""
 
     def _make(config: dict | None = None, client: FakeClient | None = None, **init_kwargs):
         import json
 
         config_path = hermes_env / "hindsight" / "config.json"
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(
-            json.dumps(
-                {"mode": "local_external", "api_url": "http://server.test", "apiKey": "test-key", **(config or {})}
-            )
-        )
+        config_path.write_text(json.dumps({"mode": "cloud", "apiKey": "test-key", **(config or {})}))
         fake = client or FakeClient()
         instance = plugin.HindsightMemoryProvider()
-        monkeypatch.setattr(instance, "_new_api_client", lambda: fake)
+        monkeypatch.setattr(instance, "_new_cloud_client", lambda: fake)
         # The /version probe is a live HTTP call; pin the capability instead.
         monkeypatch.setattr(plugin, "_check_api_supports_update_mode_append", lambda *a, **k: True)
         instance.initialize(init_kwargs.pop("session_id", "session-1"), **init_kwargs)
