@@ -89,6 +89,8 @@ _EXTRA_BANK_TIMEOUT_SHARE = 0.8
 # unreachable bank costs one timeout per cooldown instead of one on every turn.
 _EXTRA_BANK_COOLDOWN = 300.0
 _RETAIN_CONTEXT_DEFAULT = "conversation between Hermes Agent and the User"
+# Runs that end after one task: no next turn exists to use a recall queued at the end of this one.
+_ONE_SHOT_CONTEXTS = frozenset({"kanban", "subagent", "cron"})
 
 
 def _plugin_version() -> str:
@@ -1815,6 +1817,11 @@ class HindsightMemoryProvider(MemoryProvider):
     def queue_prefetch(self, query: str, *, session_id: str = "") -> None:
         # Sync mode recalls live each turn — nothing to prime in the background.
         if self._recall_sync or self._recall_disabled():
+            return
+        # The recall queued after a finished turn serves the *next* turn. A one-shot run has none: the
+        # process ends, shutdown() waits 5 s and closes the connection, and the server cancels a recall
+        # nobody reads (Homelab-Memory#65). The hindsight_recall tool still works in these runs.
+        if getattr(self, "_agent_context", "primary") in _ONE_SHOT_CONTEXTS:
             return
         # A late call for a session we already left must not prime (or bump the generation of) this one (#5628).
         if session_id and session_id != self._session_id:
