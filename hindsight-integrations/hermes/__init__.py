@@ -1533,10 +1533,10 @@ class HindsightMemoryProvider(MemoryProvider):
 
     def _apply_retain_policy(self, cfg: dict) -> None:
         """Pure-config retain knobs (no env/secret reads; ``{}`` yields the defaults)."""
-        # Owned capture policy preserves installed helper eligibility. Scheduled
-        # runs remain opt-in; changing project attribution must not disable helpers.
+        # Hermes' provider contract: skip automatic writes for non-primary runs (#5555). retain_cron opts
+        # scheduled runs back in; sub-agents and kanban workers report to a parent that retains its own turns.
         context = getattr(self, "_agent_context", "primary")
-        skip = context == "cron" and not cfg.get("retain_cron", False)
+        skip = context in ("subagent", "kanban") or (context == "cron" and not cfg.get("retain_cron", False))
         self._auto_retain = bool(cfg.get("auto_retain", True)) and not skip
         self._retain_every_n_turns = max(1, _parse_int_setting(cfg.get("retain_every_n_turns"), 1))
         self._retain_context = cfg.get("retain_context", _RETAIN_CONTEXT_DEFAULT)
@@ -1863,10 +1863,9 @@ class HindsightMemoryProvider(MemoryProvider):
         return metadata
 
     def _project_memory_mode(self) -> bool:
-        return "project_memory" in (self._config or {}) or (
-            isinstance(self._observation_scopes, list)
-            and any("project:*" in scope for scope in self._observation_scopes)
-        )
+        # Opt-in by the config key alone. A `project:*` observation scope is a server-side setting that
+        # homes already carry without a binding; reading it as a request would refuse all their writes.
+        return "project_memory" in (self._config or {})
 
     def _project_memory_stamp(self, cwd: str | None = None) -> CaptureStamp | None:
         if not self._project_memory_mode():

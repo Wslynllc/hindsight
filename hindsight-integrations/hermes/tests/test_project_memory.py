@@ -191,7 +191,6 @@ def test_capture_policy_does_not_bypass_capture_restrictions(provider, project_l
 @pytest.mark.parametrize(
     "defect",
     [
-        "missing-policy",
         "invalid-policy",
         "missing-cwd",
         "unknown-root",
@@ -213,9 +212,7 @@ def test_project_binding_failures_send_no_additional_retain(provider, project_la
         _note(instance, ["project:owned-main"])
         assert len(fake.retains) == 1
         policy = instance._config["project_memory"]
-        if defect == "missing-policy":
-            del instance._config["project_memory"]  # explicit project:* still fails closed
-        elif defect == "invalid-policy":
+        if defect == "invalid-policy":
             instance._config["project_memory"] = {}
         elif defect == "missing-cwd":
             instance._cwd = ""
@@ -244,10 +241,25 @@ def test_project_binding_failures_send_no_additional_retain(provider, project_la
     assert len(fake.retains) == 1
 
 
+def test_without_a_project_memory_key_a_wildcard_scope_does_not_block_writes(provider, project_layout):
+    """Opt-in (Homelab-Memory#68): the `project:*` scope alone is not a binding request, so dropping the
+    `project_memory` block returns the provider to native behavior instead of refusing every write."""
+    repo, config = project_layout.repo, project_layout.config
+    instance, fake = provider(config, cwd=str(repo))
+    try:
+        _note(instance, ["project:owned-main"])
+        del instance._config["project_memory"]
+        assert not instance._project_memory_mode()
+        _note(instance)
+    finally:
+        instance.shutdown()
+    assert len(fake.retains) == 2
+
+
 @pytest.mark.parametrize(
     "context,retain_cron,expected",
     [
-        ("subagent", False, 1),
+        ("subagent", False, 0),  # #5555: helpers report to a parent that retains its own turns
         ("cron", False, 0),
         ("cron", True, 1),
     ],

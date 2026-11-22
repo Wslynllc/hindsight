@@ -851,12 +851,12 @@ def test_retain_cron_opts_cron_runs_back_in(provider):
 
 
 @pytest.mark.parametrize("agent_context", ["subagent", "kanban"])
-def test_subagent_and_kanban_capture_remains_eligible(provider, agent_context):
-    """Owned distribution preserves installed helper capture during project rollout."""
+def test_subagent_and_kanban_runs_are_not_auto_retained(provider, agent_context):
+    """#5555: delegated children and kanban workers would fill the bank with task chatter."""
     child, fake = provider({}, agent_context=agent_context)
     child.sync_turn("work kanban task t_1", "done")
     child.shutdown()
-    assert len(fake.retains) == 1
+    assert fake.retains == []
 
 
 def test_a_kanban_worker_is_recognised_from_the_env(provider, monkeypatch):
@@ -866,7 +866,7 @@ def test_a_kanban_worker_is_recognised_from_the_env(provider, monkeypatch):
     worker.sync_turn("work kanban task t_1", "done")
     worker.shutdown()
     assert worker._agent_context == "kanban"
-    assert len(fake.retains) == 1
+    assert fake.retains == []
 
 
 def test_a_late_prefetch_for_a_previous_session_is_ignored(provider, monkeypatch):
