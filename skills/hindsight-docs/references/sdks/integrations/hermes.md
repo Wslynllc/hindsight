@@ -307,13 +307,13 @@ The lookup stops at the repository root. Only `bank_id` is read.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `auto_retain` | `true` | Automatically retain conversation turns. Sub-agent (`delegate_task`) runs and kanban workers are never auto-retained; their parent session keeps its own turns. |
+| `auto_retain` | `true` | Automatically retain conversation turns. Sub-agent (`delegate_task`) runs and kanban workers (recognised by `HERMES_KANBAN_TASK`) are never auto-retained; their parent session keeps its own turns. The `hindsight_retain` tool and the built-in memory mirror still write in those runs. |
 | `retain_cron` | `false` | Also auto-retain scheduled (cron) runs. Off by default, so job output stays out of the user's memory; the `hindsight_retain` tool still works in cron runs. |
 | `retain_async` | `true` | Process retain asynchronously on the Hindsight server |
 | `retain_every_n_turns` | `1` | Retain every N turns (1 = every turn) |
 | `retain_context` | `conversation between Hermes Agent and the User` | Context label for retained memories |
 | `retain_tags` | — | Default tags applied to retained memories; merged with per-call tool tags. JSON list or comma-separated text. |
-| `observation_scopes` | `shared` | How observations are grouped by tag during consolidation: `shared` (one scope for the whole bank, so observations merge across sessions; the `session:`/`parent:` tags stay on the facts for filtering), `combined` (one scope per exact tag set, which here means one per session), `per_tag` (one pass per tag), `all_combinations` (every tag subset, expensive), or a JSON list of tag lists for custom scopes (e.g. `[["user:alice"], ["project-x"]]`). |
+| `observation_scopes` | `shared` | How observations are grouped by tag during consolidation: `shared` (one scope for the whole bank, so observations merge across sessions; the `session:`/`parent:` tags stay on the facts for filtering), `combined` (one scope per exact tag set, which here means one per session), `per_tag` (one pass per tag), `all_combinations` (every tag subset, expensive), or a JSON list of tag lists for custom scopes (e.g. `[["user:alice"], ["project-x"]]`). A `[["project:*"]]` scope only groups observations; it does not turn on project memory. |
 | `retain_source` | — | Opt-in `metadata.source` attached to retained memories (identifies the storing client, e.g. `hermes`). Empty by default — no attribution tag ships unless you set it. |
 | `retain_strategy` | — | Named retain strategy sent with every stored item (`HINDSIGHT_RETAIN_STRATEGY`). The bank must define it under `retain_strategies`; an unknown name is ignored by the server. Empty lets the bank decide. |
 | `retain_indicator` | `true` | Show a `👁️ Hindsight — saving to memory…` status line when a turn is saved. Turn off for customer-facing agents. |
@@ -328,6 +328,47 @@ The lookup stops at the repository root. Only `bank_id` is read.
 - If the server accepts a save and its processing fails later, the plugin asks the server to retry it, up to 3 times. It checks before each new save, so a failure after the process exits is not retried; retry it from the control plane.
 - If the bank keeps no document text (`store_document_text` off), it can't append to a session document. The plugin then stops appending and stores the turns in a separate document per process instead.
 - An error that can never succeed (any other 4xx) is logged and the save is dropped.
+
+### Project memory (opt-in)
+
+Project memory tags every save with the git repository the session started in and refuses any save that
+cannot be bound to a reviewed policy. It is **off unless the config has a `project_memory` key**. Nothing else
+turns it on: not a `[["project:*"]]` observation scope, not a `project:` entry in `retain_tags`. Without the key
+saves are exactly what the Retain settings above describe, with no repository stamp, including for homes that
+already use those two settings.
+
+With the key present, every save (an automatic turn, a built-in memory write and the `hindsight_retain` tool)
+is checked first. If any check fails, nothing is sent and the warning `Project memory write blocked` is logged.
+An empty `"project_memory": {}` is such a failure, so it blocks everything.
+
+```json
+{
+  "bank_id": "projects",
+  "observation_scopes": [["project:*"]],
+  "project_memory": {
+    "bank_id": "projects",
+    "capture_policy": "coding-agent",
+    "exclusion_config": "/home/me/.hindsight/coding-agent.json",
+    "exclusion_config_sha256": "<sha256 of that file>",
+    "excluded_path_ids": ["<16 hex characters per excluded folder>"]
+  }
+}
+```
+
+| Key | Description |
+|-----|-------------|
+| `bank_id` | The only bank written: it must equal the top-level `bank_id`, with no `additional_banks` or `mirror_to_own_bank` extras, and `bank_id_template` and `trusted_project_dirs` unset. |
+| `capture_policy` | `coding-agent`: any git checkout that is not excluded may save. Use exactly one of this and `approved_roots`. |
+| `approved_roots` | Absolute folders. The session must start inside one, and the repository root (and the main checkout, for a linked worktree) must itself be listed. A filesystem root or your home folder is refused. |
+| `exclusion_config` | Absolute path of a JSON file with a top-level `paths` object; each entry with `"disabled": true` is an excluded folder, and a session started inside one saves nothing. Anything beyond path exclusions (`banks`, `mapPathToBank`, `optInOnly`, `retainSessions: false`, `harnesses` rules that disable or narrow capture) is refused. |
+| `exclusion_config_sha256` | SHA-256 of that file. It is read again on every save, so a changed or missing file blocks queued saves. |
+| `excluded_path_ids` | One id per excluded folder: the first 16 hex characters of the SHA-256 of the folder's path written as a JSON string. The list must match the file exactly, so at least one folder must be excluded. |
+
+Also required: `observation_scopes` is exactly `[["project:*"]]`, and the session's working directory is inside a
+git checkout (a plain folder, such as a kanban scratch directory, saves nothing). Each save gets the tag
+`project:<repository>` and the metadata `repo`, `project` and `worktree_id`; every worktree of a repository maps
+to the same project. A `project:` tag you set yourself (in `retain_tags` or a tool call) that differs from that
+one is refused. The automatic-retain rules for sub-agents, kanban workers and cron runs apply unchanged.
 
 ### Integration
 
